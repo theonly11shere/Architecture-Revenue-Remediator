@@ -124,12 +124,8 @@ def run_demo():
         print("=" * 70)
         paid = reporter.generate_paid()
         print(f"Scores: {paid['scores']}")
-        print(f"All checkpoints: {len(paid['all_checkpoints'])}")
-        print(f"Revenue exposure label: {paid['revenue_exposure']['label']}")
-        print(f"  Conservative: ${paid['revenue_exposure']['conservative']['annual_exposure']:,.2f}")
-        print(f"  Expected:     ${paid['revenue_exposure']['expected']['annual_exposure']:,.2f}")
-        print(f"  High Exposure: ${paid['revenue_exposure']['high_exposure']['annual_exposure']:,.2f}")
-        print(f"Action plan items: {len(paid['action_plan'])}")
+        print(f"Fix steps: {len(paid.get('fix_steps', []))}")
+print(f"Revenue leak estimate: ${paid.get('revenue_leak_estimate', {}).get('monthly_leak_estimate', 0):,.2f}/mo")
 
         # Admin report
         print("\n" + "=" * 70)
