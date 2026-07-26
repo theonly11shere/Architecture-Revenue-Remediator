@@ -1,11 +1,21 @@
 #!/usr/bin/env python3
-"""Report Generator — builds free and paid reports from scraped data."""
+"""Report Generator — builds free, paid, admin, and forwardable customer reports.
+
+PRIVACY RULES:
+- Free report: 6 scores, basic scan info, top 5 failures ONLY
+- Paid report: Everything in free + fix steps + competitor analysis + roadmap
+- Admin report: EVERYTHING (full raw data, all checkpoints, competitor gaps, roadmap)
+- Forwardable report: Polished markdown derived from admin data
+"""
 from typing import Any, Dict, List, Optional
+from datetime import datetime
 
 from config import (
     TOTAL_CHECKS, SEVERITY, FUTURE_PREDICTIONS,
     DEFAULT_TRAFFIC, DEFAULT_CONVERSION_RATE, DEFAULT_AOV, DEFAULT_PROFIT_MARGIN,
-    CALCULATOR_LABEL, FREE_REPORT_CTA, BUSINESS_TYPE_CHECKS,
+    CALCULATOR_LABEL, FREE_REPORT_CTA, BUSINESS_TYPE_CHECKS, SCORE_NAMES,
+    ADMIN_REPORT_BRANDING, FORWARDABLE_REPORT_FOOTER,
+    ADMIN_REPORT_INCLUDE_ROADMAP, ADMIN_REPORT_INCLUDE_COMPETITOR,
 )
 from scorer import RevenueScorer
 from content_evidence_signals import ContentEvidenceSignals
@@ -88,8 +98,13 @@ class ReportGenerator:
             },
         }
 
+    # ════════════════════════════════════════════════════════════════════════
+    #  FREE REPORT — What the public/customer sees (NO competitor data)
+    # ════════════════════════════════════════════════════════════════════════
+
     def generate_free(self) -> Dict[str, Any]:
         scores = self.revenue_scorer.get_scores()
+        six_scores = self.revenue_scorer.get_six_scores()
         readiness = scores.get("readiness_score", 0)
         quality = self._scan_quality()
         severity = self._severity_label(readiness, quality)
@@ -110,12 +125,23 @@ class ReportGenerator:
                     "status": sig.get("status", "unknown"),
                     "detail": sig.get("detail", ""),
                 })
+
+        six_score_breakdown = {}
+        for name, value in six_scores.items():
+            six_score_breakdown[name] = {
+                "score": value,
+                "label": self._six_score_label(name),
+                "status": self._six_score_status(value),
+            }
+
+        # FREE report: NO competitor data, NO fix steps, NO roadmap
         report = {
             "type": "free",
             "url": self.url,
             "timestamp": self.data.get("timestamp", ""),
             "scan_quality": quality,
             "scores": scores,
+            "six_scores": six_score_breakdown,
             "severity": severity,
             "content_evidence_signals": evidence_signals,
             "future_prediction": self._future_prediction(readiness),
@@ -129,8 +155,17 @@ class ReportGenerator:
             "content_sameness": self.data.get("content_sameness", {}),
             "visual_twin": self.data.get("visual_twin", {}),
             "revenue_exposure_teaser": self._revenue_teaser(),
+            # Revenue leak teaser only (not full breakdown)
+            "revenue_leak_teaser": {
+                "gap_percentage": self.revenue_scorer.get_six_scores().get("revenue_leak", 0),
+                "note": "Upgrade for full revenue leak analysis with dollar estimates.",
+            },
             "business_type": self.data.get("business_type", {}),
             "performance": self.data.get("performance", {}),
+            "ai_copy_analysis": self.data.get("ai_copy_analysis", {}),
+            "form_friction": self.data.get("form_friction", {}),
+            "tech_stack_impact": self.data.get("tech_stack_impact", {}),
+            # Competitor data INTENTIONALLY OMITTED from free report
         }
         if quality == "insufficient":
             report["insufficient_scan_message"] = (
@@ -142,10 +177,34 @@ class ReportGenerator:
             report["can_show_preview"] = True
         return report
 
+    def _six_score_label(self, name: str) -> str:
+        labels = {
+            "differentiation": "Differentiation",
+            "trust_credibility": "Trust & Credibility",
+            "conversion_friction": "Conversion Friction",
+            "ai_copy_cliche": "AI Copy & Cliché",
+            "tech_stack_impact": "Tech Stack Impact",
+            "revenue_leak": "Revenue Leak",
+        }
+        return labels.get(name, name.replace("_", " ").title())
+
+    def _six_score_status(self, value: int) -> str:
+        if value >= 80: return "excellent"
+        if value >= 60: return "good"
+        if value >= 40: return "fair"
+        if value >= 20: return "poor"
+        return "critical"
+
+    # ════════════════════════════════════════════════════════════════════════
+    #  PAID REPORT — Customer gets this after paying (includes competitor)
+    # ════════════════════════════════════════════════════════════════════════
+
     def generate_paid(self) -> Dict[str, Any]:
         free_report = self.generate_free()
         free_report["type"] = "paid"
-        free_report["upgrade_cta"] = "Full report with actionable fix steps."
+        free_report["upgrade_cta"] = "Full report with actionable fix steps and competitor analysis."
+
+        # Add fix steps
         fix_steps = []
         btype = self.data.get("business_type", {}).get("detected_type", "unknown")
         for f in self.top_failures:
@@ -156,7 +215,35 @@ class ReportGenerator:
                 "fix_steps": self._generate_fix_steps(f, btype),
             })
         free_report["fix_steps"] = fix_steps
+
+        # Add full revenue leak estimate (was teaser only in free)
+        free_report["revenue_leak_estimate"] = self.revenue_scorer.get_revenue_leak_estimate()
+        # Remove the teaser
+        free_report.pop("revenue_leak_teaser", None)
+
+        # Add competitor analysis (PAID ONLY)
+        comp = self.data.get("competitor_analysis", {})
+        if comp:
+            free_report["competitor_analysis"] = {
+                "gap_score": comp.get("gap_score", 0),
+                "competitor_count": comp.get("competitor_count", 0),
+                "aggregate_missing_features": comp.get("aggregate_missing_features", []),
+                "competitors": [
+                    {
+                        "domain": c.get("domain", ""),
+                        "shared_with_user": c.get("shared_with_user", []),
+                        "user_missing": c.get("user_missing", []),
+                        "advantage_score": c.get("advantage_score", 0),
+                    }
+                    for c in comp.get("competitors", [])
+                ],
+            }
+
         return free_report
+
+    # ════════════════════════════════════════════════════════════════════════
+    #  ROADMAP REPORT — Week-by-week plan (paid upgrade)
+    # ════════════════════════════════════════════════════════════════════════
 
     def generate_roadmap(self) -> Dict[str, Any]:
         report = self.generate_paid()
@@ -184,9 +271,133 @@ class ReportGenerator:
         report["roadmap"] = weeks
         return report
 
+    # ════════════════════════════════════════════════════════════════════════
+    #  ADMIN REPORT — EVERYTHING, for owner eyes only
+    # ════════════════════════════════════════════════════════════════════════
+
+    def generate_admin(self) -> Dict[str, Any]:
+        """Admin report — generated for EVERY scan regardless of tier.
+        Contains raw data, competitor gaps, full roadmap, everything."""
+        roadmap = self.generate_roadmap()
+        return {
+            "type": "admin",
+            "url": self.url,
+            "timestamp": self.data.get("timestamp", ""),
+            "scores": self.revenue_scorer.get_scores(),
+            "six_scores": self.revenue_scorer.get_six_scores(),
+            "all_checkpoints": {
+                "trust": self.data.get("trust", {}),
+                "conversion": self.data.get("conversion", {}),
+                "seo": self.data.get("seo", {}),
+                "content": self.data.get("content", {}),
+                "technical": self.data.get("technical", {}),
+            },
+            "top_failures": self.top_failures,
+            "fix_steps": roadmap.get("fix_steps", []),
+            "roadmap": roadmap.get("roadmap", []),
+            "revenue_leak_estimate": self.revenue_scorer.get_revenue_leak_estimate(),
+            # FULL competitor data (admin only)
+            "competitor_analysis": self.data.get("competitor_analysis", {}),
+            "competitor_urls": self.data.get("competitor_urls", []),
+            "ai_copy_analysis": self.data.get("ai_copy_analysis", {}),
+            "form_friction": self.data.get("form_friction", {}),
+            "tech_stack_impact": self.data.get("tech_stack_impact", {}),
+            "social_signals": self.data.get("social_signals_enhanced", {}),
+            "business_type": self.data.get("business_type", {}),
+            "lighthouse": self.data.get("lighthouse", {}),
+            "mobile_test": self.data.get("mobile_test", {}),
+            "security_headers": self.data.get("security_headers", {}),
+            "ssl_valid": self.data.get("ssl_valid", {}),
+            "screenshot_path": self.data.get("screenshot_path"),
+            "visual_twin": self.data.get("visual_twin", {}),
+            "template_fingerprint": self.data.get("template_fingerprint", {}),
+            "content_sameness": self.data.get("content_sameness", {}),
+            "raw_html_length": self.data.get("html_length", 0),
+            "scan_quality": self._scan_quality(),
+        }
+
+    # ════════════════════════════════════════════════════════════════════════
+    #  FORWARDABLE REPORT — Polished markdown for customer (from admin data)
+    # ════════════════════════════════════════════════════════════════════════
+
+    def generate_forwardable_report(self) -> str:
+        """Generates a polished markdown report you can forward to customers."""
+        admin = self.generate_admin()
+        six = admin["six_scores"]
+        leak = admin["revenue_leak_estimate"]
+        comp = admin.get("competitor_analysis", {})
+        btype = admin.get("business_type", {}).get("detected_type", "unknown").title()
+
+        md = f"""# {ADMIN_REPORT_BRANDING}
+## Confidential Revenue Analysis — {self.url}
+**Generated:** {admin.get('timestamp', datetime.now().isoformat())}  
+**Business Type:** {btype}
+
+---
+
+### Executive Summary
+
+| Score | Value | Status |
+|-------|-------|--------|
+| Readiness | {admin['scores']['readiness_score']}/100 | {self._six_score_status(admin['scores']['readiness_score'])} |
+| Revenue Leak | ${leak['monthly_leak_estimate']:,.2f}/mo | {self._six_score_status(six.get('revenue_leak', 0))} |
+
+### 6 Unified Scores
+
+| Dimension | Score | Assessment |
+|-----------|-------|------------|
+| Differentiation | {six.get('differentiation', 0)}/100 | {self._six_score_status(six.get('differentiation', 0))} |
+| Trust & Credibility | {six.get('trust_credibility', 0)}/100 | {self._six_score_status(six.get('trust_credibility', 0))} |
+| Conversion Friction | {six.get('conversion_friction', 0)}/100 | {self._six_score_status(six.get('conversion_friction', 0))} |
+| AI Copy & Cliché | {six.get('ai_copy_cliche', 0)}/100 | {self._six_score_status(six.get('ai_copy_cliche', 0))} |
+| Tech Stack Impact | {six.get('tech_stack_impact', 0)}/100 | {self._six_score_status(six.get('tech_stack_impact', 0))} |
+| Revenue Leak Exposure | {six.get('revenue_leak', 0)}/100 | {self._six_score_status(six.get('revenue_leak', 0))} |
+
+### Revenue Impact
+- **Current estimated monthly revenue:** ${leak['current_monthly_revenue']:,.2f}
+- **Potential monthly revenue:** ${leak['potential_monthly_revenue']:,.2f}
+- **Estimated monthly leak:** ${leak['monthly_leak_estimate']:,.2f}
+- **Estimated annual leak:** ${leak['annual_leak_estimate']:,.2f}
+
+"""
+
+        if ADMIN_REPORT_INCLUDE_COMPETITOR and comp and comp.get("competitors"):
+            md += "\n### Competitor Gap Analysis\n\n"
+            md += f"**Competitors analyzed:** {comp.get('competitor_count', 0)}  \n"
+            md += f"**Your gap score:** {comp.get('gap_score', 0)}/100 (higher = less gap)\n\n"
+            if comp.get("aggregate_missing_features"):
+                md += "**Features your competitors have that you may be missing:**\n\n"
+                for feat in comp["aggregate_missing_features"]:
+                    md += f"- {feat}\n"
+                md += "\n"
+            for c in comp.get("competitors", []):
+                md += f"#### vs. {c['domain']}\n"
+                if c.get("user_missing"):
+                    md += f"Missing: {', '.join(c['user_missing'])}\n"
+                else:
+                    md += "You match or exceed this competitor's features.\n"
+                md += "\n"
+
+        if ADMIN_REPORT_INCLUDE_ROADMAP and admin.get("roadmap"):
+            md += "\n### 1-Month Fix Roadmap\n\n"
+            for week in admin["roadmap"]:
+                md += f"#### {week['week']}: {week['focus']}\n"
+                for item in week.get("items", []):
+                    md += f"- **[{item['severity'].upper()}]** {item['item']}\n"
+                    for step in item.get("steps", []):
+                        md += f"  - {step}\n"
+                md += "\n"
+
+        md += f"\n---\n{FORWARDABLE_REPORT_FOOTER}\n"
+
+        return md
+
+    # ════════════════════════════════════════════════════════════════════════
+    #  FIX STEPS GENERATOR
+    # ════════════════════════════════════════════════════════════════════════
+
     def _generate_fix_steps(self, failure: Dict[str, Any], business_type: str = "unknown") -> List[str]:
         item = failure.get("item", "").lower()
-        # Business-type specific overrides
         if business_type == "ecommerce":
             ecommerce_steps = {
                 "page load speed": [
@@ -249,7 +460,31 @@ class ReportGenerator:
             }
             if item in local_steps:
                 return local_steps[item]
-        # Generic fallback steps
+        elif business_type == "restaurant":
+            restaurant_steps = {
+                "page load speed": [
+                    "Compress food photography to WebP (<300KB each)",
+                    "Lazy-load menu images below the fold",
+                    "Minimize third-party reservation widget scripts",
+                ],
+                "clear cta above fold": [
+                    "Add 'Reserve a Table' button above the fold",
+                    "Display phone number as click-to-call on mobile",
+                    "Show hours and 'Open Now' status prominently",
+                ],
+                "mobile responsive": [
+                    "Test menu readability on mobile (font size, contrast)",
+                    "Ensure reservation form works with mobile keyboards",
+                    "Verify 'Get Directions' opens native maps app",
+                ],
+                "contact info visible": [
+                    "Add address with embedded map to footer",
+                    "Display hours for each day of the week",
+                    "Include dietary restriction info (vegan, gluten-free)",
+                ],
+            }
+            if item in restaurant_steps:
+                return restaurant_steps[item]
         steps = {
             "page load speed": [
                 "Compress images using WebP format",
