@@ -8,6 +8,7 @@ from datetime import datetime
 
 from fastapi import FastAPI, HTTPException, BackgroundTasks
 from fastapi.responses import JSONResponse
+from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, HttpUrl
 
 # RRS modules
@@ -36,6 +37,21 @@ except ImportError:
     REDIS_AVAILABLE = False
 
 app = FastAPI(title="Revenue Readiness Scanner", version="4.1.0")
+
+# CORS — allow requests from your website
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=[
+        "https://trilloka.com",
+        "https://www.trilloka.com",
+        "http://localhost:3000",
+        "http://localhost:5173",
+        "http://localhost:8000",
+    ],
+    allow_credentials=True,
+    allow_methods=["GET", "POST", "OPTIONS"],
+    allow_headers=["*"],
+)
 
 
 # ── Request Models ──────────────────────────────────────────────────────────
@@ -88,7 +104,7 @@ async def scan(request: ScanRequest, background_tasks: BackgroundTasks):
         competitor_urls=competitor_urls,
         location=location,
     )
-    data = scraper.scrape()
+    data = await scraper._scrape_async()
 
     if "error" in data:
         raise HTTPException(status_code=500, detail=f"Scrape failed: {data['error']}")
@@ -148,7 +164,7 @@ async def scan(request: ScanRequest, background_tasks: BackgroundTasks):
 # ── Admin Report Background Task ────────────────────────────────────────────
 
 async def _process_admin_report(url: str, domain: str, reporter: ReportGenerator, data: dict):
-    """Generates admin report, saves to Redis, emails to admin."""
+    """Generates admin report, saves to Redis, emails pretty HTML to admin via Resend."""
     try:
         # Generate admin report
         admin_report = reporter.generate_admin()
@@ -164,33 +180,33 @@ async def _process_admin_report(url: str, domain: str, reporter: ReportGenerator
             except Exception as e:
                 print(f"[Redis save failed] {e}")
 
-        # Email to admin (if configured)
+        # Generate pretty HTML using email_sender
+        from email_sender import ReportEmailer
+        emailer = ReportEmailer()
+        html_body = emailer._render_admin_html(admin_report)
+        full_html = emailer._build_html_wrapper(f"[ADMIN] Revenue Readiness — {url}", html_body)
+
+        # Email to admin via Resend (reliable delivery from Railway)
         if ADMIN_REPORT_AUTO_SEND and RESEND_API_KEY and RESEND_AVAILABLE:
             try:
                 resend.api_key = RESEND_API_KEY
                 resend.Emails.send({
                     "from": EMAIL_FROM,
                     "to": ADMIN_EMAIL,
-                    "subject": f"RRS Admin Report: {url}",
-                    "html": f"""
-                    <div style="font-family: Arial, sans-serif; max-width: 700px;">
-                        <h2>Revenue Readiness Scanner — Admin Report</h2>
-                        <p><strong>Site:</strong> {url}</p>
-                        <p><strong>Domain:</strong> {domain}</p>
-                        <p><strong>Time:</strong> {datetime.utcnow().isoformat()} UTC</p>
-                        <hr>
-                        <pre style="background: #f5f5f5; padding: 15px; border-radius: 5px; overflow-x: auto;">
-{forwardable_md[:5000]}
-                        </pre>
-                        <p style="color: #666; font-size: 12px;">
-                            Full report saved to Redis key: rrs:admin:{scan_id}
-                        </p>
-                    </div>
-                    """,
+                    "subject": f"[ADMIN] Revenue Readiness — {url}",
+                    "html": full_html,
+                    "text": forwardable_md,
                 })
                 print(f"[Admin email sent] {ADMIN_EMAIL} for {url}")
             except Exception as e:
                 print(f"[Admin email failed] {e}")
+
+        # Fallback: try SMTP (may be blocked by Gmail from cloud IPs)
+        try:
+            emailer.send_admin_report(reporter, ADMIN_EMAIL)
+            print(f"[Admin SMTP email sent] {ADMIN_EMAIL} for {url}")
+        except Exception as e:
+            print(f"[Admin SMTP email failed — expected from cloud IPs] {e}")
 
     except Exception as e:
         print(f"[Admin report processing failed] {e}")
