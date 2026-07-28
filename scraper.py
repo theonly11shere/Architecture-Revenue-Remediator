@@ -32,7 +32,7 @@ from bs4 import BeautifulSoup
 
 from config import (
     CHECKPOINTS, BUSINESS_TYPE_KEYWORDS, SECURITY_HEADERS,
-    AI_GENERATED_PATTERNS, TECH_STACK_IMPACT, FORM_FRICTION_THRESHOLDS,
+    AI_GENERATED_PATTERNS, GENERIC_PHRASES, TECH_STACK_IMPACT, FORM_FRICTION_THRESHOLDS,
     SOCIAL_SIGNAL_SOURCES, COMPLAINT_KEYWORDS,
     COMPETITOR_FEATURE_SIGNATURES, MAX_COMPETITORS,
 )
@@ -283,7 +283,7 @@ class WebsiteScraper:
             "content_sameness": self._content_sameness(),
             "visual_fingerprint": self._visual_fingerprint(),
             "ssl_valid": self._check_ssl(),
-            "security_headers": self._check_security_headers(self._headers),
+            "security_headers": self._check_security_headers_raw(self._headers),
             "broken_links_full": self._check_broken_links() if self.tier == "paid" else {},
             "screenshot_path": None,
             "lighthouse": {},
@@ -1110,7 +1110,7 @@ class WebsiteScraper:
         except Exception as e:
             return {"valid": False, "error": str(e)}
 
-    def _check_security_headers(self, headers) -> Dict[str, Any]:
+    def _check_security_headers_detail(self, headers) -> Dict[str, Any]:
         headers_lower = {k.lower(): v for k, v in headers.items()}
         important = [
             "strict-transport-security",
@@ -1130,7 +1130,7 @@ class WebsiteScraper:
         }
 
     def _check_security_headers_raw(self, headers) -> Dict[str, Any]:
-        return self._check_security_headers(headers)
+        return self._check_security_headers_detail(headers)
 
     def _check_broken_links(self) -> Dict[str, Any]:
         if not self.soup:
