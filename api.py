@@ -8,6 +8,7 @@ from datetime import datetime
 
 from fastapi import FastAPI, HTTPException, BackgroundTasks
 from fastapi.responses import JSONResponse
+from bs4 import BeautifulSoup
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, HttpUrl
 
@@ -114,7 +115,7 @@ async def scan(request: ScanRequest, background_tasks: BackgroundTasks):
     revenue_scorer.calculate_scores()
 
     # 3. Content evidence
-    content_evidence = ContentEvidenceSignals(data)
+    content_evidence = ContentEvidenceSignals(BeautifulSoup(data['raw_html'], 'html.parser'), data['url'])
     content_evidence.analyze()
 
     # 4. Top failures
