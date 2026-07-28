@@ -90,7 +90,7 @@ async def scan(request: ScanRequest, background_tasks: BackgroundTasks):
         competitor_urls=competitor_urls,
         location=location,
     )
-    data = scraper.scrape()
+    data = await scraper._scrape_async()
 
     if "error" in data:
         raise HTTPException(status_code=500, detail=f"Scrape failed: {data['error']}")

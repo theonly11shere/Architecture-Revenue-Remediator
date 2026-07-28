@@ -204,11 +204,21 @@ class WebsiteScraper:
     # ── Public API ──────────────────────────────────────────────────────────
 
     def scrape(self) -> Dict[str, Any]:
-        """Synchronous entry point called by api.py"""
+        """Synchronous entry point called by demo.py and other sync contexts.
+        For async contexts (FastAPI), use await scraper._scrape_async() directly."""
         try:
             loop = asyncio.get_event_loop()
             if loop.is_closed():
                 raise RuntimeError("loop closed")
+            if loop.is_running():
+                # Nested event loop (e.g. inside Jupyter, some async contexts)
+                try:
+                    import nest_asyncio
+                    nest_asyncio.apply()
+                except ImportError:
+                    raise RuntimeError(
+                        "Nested event loop detected. Install nest_asyncio: pip install nest_asyncio"
+                    )
         except RuntimeError:
             loop = asyncio.new_event_loop()
             asyncio.set_event_loop(loop)
