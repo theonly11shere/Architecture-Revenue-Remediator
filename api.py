@@ -8,6 +8,7 @@ from datetime import datetime
 
 from fastapi import FastAPI, HTTPException, BackgroundTasks
 from fastapi.responses import JSONResponse
+from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, HttpUrl
 
 # RRS modules
@@ -38,6 +39,21 @@ except ImportError:
     REDIS_AVAILABLE = False
 
 app = FastAPI(title="Revenue Readiness Scanner", version="4.1.0")
+
+# CORS — allow requests from your website
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=[
+        "https://trilloka.com",
+        "https://www.trilloka.com",
+        "http://localhost:3000",
+        "http://localhost:5173",
+        "http://localhost:8000",
+    ],
+    allow_credentials=True,
+    allow_methods=["GET", "POST", "OPTIONS"],
+    allow_headers=["*"],
+)
 
 
 # ── Request Models ──────────────────────────────────────────────────────────
