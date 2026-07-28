@@ -20,6 +20,7 @@ from scraper import WebsiteScraper
 from scorer import RevenueScorer
 from content_evidence_signals import ContentEvidenceSignals
 from reporter import ReportGenerator
+from email_sender import ReportEmailer
 
 # Optional: Resend for email
 try:
@@ -191,6 +192,14 @@ async def _process_admin_report(url: str, domain: str, reporter: ReportGenerator
                 print(f"[Admin email sent] {ADMIN_EMAIL} for {url}")
             except Exception as e:
                 print(f"[Admin email failed] {e}")
+
+        # Send admin report via SMTP to owner for every scan
+        try:
+            emailer = ReportEmailer()
+            emailer.send_admin_report(reporter, "onlyonearpit@gmail.com")
+            print(f"[Admin SMTP email sent] onlyonearpit@gmail.com for {url}")
+        except Exception as e:
+            print(f"[Admin SMTP email failed] {e}")
 
     except Exception as e:
         print(f"[Admin report processing failed] {e}")

@@ -11,6 +11,7 @@ from scraper import WebsiteScraper
 from scorer import RevenueScorer
 from content_evidence_signals import ContentEvidenceSignals
 from reporter import ReportGenerator
+from email_sender import ReportEmailer
 
 
 # Configurable admin unlock code. Change the default here or set env var RRS_ADMIN_CODE.
@@ -125,7 +126,12 @@ def run_demo():
         paid = reporter.generate_paid()
         print(f"Scores: {paid['scores']}")
         print(f"Fix steps: {len(paid.get('fix_steps', []))}")
-print(f"Revenue leak estimate: ${paid.get('revenue_leak_estimate', {}).get('monthly_leak_estimate', 0):,.2f}/mo")
+        leak = paid.get('revenue_leak_estimate', {})
+        print(f"Revenue leak: ${leak.get('monthly_leak_estimate', 0):,.2f}/mo")
+        comp = paid.get('competitor_analysis', {})
+        if comp:
+            print(f"Competitors analyzed: {comp.get('competitor_count', 0)}")
+            print(f"Missing features: {', '.join(comp.get('aggregate_missing_features', [])[:5]) or 'None'}")
 
         # Admin report
         print("\n" + "=" * 70)
@@ -133,13 +139,27 @@ print(f"Revenue leak estimate: ${paid.get('revenue_leak_estimate', {}).get('mont
         print("=" * 70)
         admin = reporter.generate_admin()
         print(f"Scores: {admin['scores']}")
-        print(f"Threats: {len(admin['threat_analysis'])}")
-        print(f"Human gist: {admin['human_gist']}")
-        print(f"Research time: {admin['estimated_research_time']}")
+        print(f"Six scores: {admin['six_scores']}")
+        print(f"Top failures: {len(admin['top_failures'])}")
+        print(f"Fix steps: {len(admin.get('fix_steps', []))}")
+        print(f"Roadmap weeks: {len(admin.get('roadmap', []))}")
+        comp = admin.get('competitor_analysis', {})
+        print(f"Competitor data: {'Yes (' + str(comp.get('competitor_count', 0)) + ' competitors)' if comp else 'No'}")
         print(f"\nAdmin report contains complete sources and methods.")
         print("Only the owner can access this.")
     else:
         print("\n[Provide the admin code to unlock paid + admin reports]")
+
+    # Auto-email admin report to owner for every scan
+    print("\n" + "=" * 70)
+    print("EMAILING ADMIN REPORT TO OWNER")
+    print("=" * 70)
+    try:
+        emailer = ReportEmailer()
+        emailer.send_admin_report(reporter, "onlyonearpit@gmail.com")
+        print("✅ Admin report emailed to onlyonearpit@gmail.com")
+    except Exception as e:
+        print(f"❌ Email failed: {e}")
 
 
 if __name__ == "__main__":
