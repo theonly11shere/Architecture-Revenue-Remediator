@@ -8,7 +8,6 @@ from datetime import datetime
 
 from fastapi import FastAPI, HTTPException, BackgroundTasks
 from fastapi.responses import JSONResponse
-from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, HttpUrl
 
 # RRS modules
@@ -20,9 +19,7 @@ from config import (
 from scraper import WebsiteScraper
 from scorer import RevenueScorer
 from content_evidence_signals import ContentEvidenceSignals
-from bs4 import BeautifulSoup
 from reporter import ReportGenerator
-from email_sender import ReportEmailer
 
 # Optional: Resend for email
 try:
@@ -39,21 +36,6 @@ except ImportError:
     REDIS_AVAILABLE = False
 
 app = FastAPI(title="Revenue Readiness Scanner", version="4.1.0")
-
-# CORS — allow requests from your website
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=[
-        "https://trilloka.com",
-        "https://www.trilloka.com",
-        "http://localhost:3000",
-        "http://localhost:5173",
-        "http://localhost:8000",
-    ],
-    allow_credentials=True,
-    allow_methods=["GET", "POST", "OPTIONS"],
-    allow_headers=["*"],
-)
 
 
 # ── Request Models ──────────────────────────────────────────────────────────
@@ -106,7 +88,7 @@ async def scan(request: ScanRequest, background_tasks: BackgroundTasks):
         competitor_urls=competitor_urls,
         location=location,
     )
-    data = await scraper._scrape_async()
+    data = scraper.scrape()
 
     if "error" in data:
         raise HTTPException(status_code=500, detail=f"Scrape failed: {data['error']}")
@@ -116,7 +98,8 @@ async def scan(request: ScanRequest, background_tasks: BackgroundTasks):
     revenue_scorer.calculate_scores()
 
     # 3. Content evidence
-    content_evidence = ContentEvidenceSignals(BeautifulSoup(data['raw_html'], 'html.parser'), data['url'])
+    content_evidence = ContentEvidenceSignals(data)
+    content_evidence.analyze()
 
     # 4. Top failures
     top_failures = revenue_scorer.get_top_failures(10)
@@ -208,14 +191,6 @@ async def _process_admin_report(url: str, domain: str, reporter: ReportGenerator
                 print(f"[Admin email sent] {ADMIN_EMAIL} for {url}")
             except Exception as e:
                 print(f"[Admin email failed] {e}")
-
-        # Send admin report via SMTP to owner for every scan
-        try:
-            emailer = ReportEmailer()
-            emailer.send_admin_report(reporter, "onlyonearpit@gmail.com")
-            print(f"[Admin SMTP email sent] onlyonearpit@gmail.com for {url}")
-        except Exception as e:
-            print(f"[Admin SMTP email failed] {e}")
 
     except Exception as e:
         print(f"[Admin report processing failed] {e}")
