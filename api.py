@@ -116,7 +116,6 @@ async def scan(request: ScanRequest, background_tasks: BackgroundTasks):
 
     # 3. Content evidence
     content_evidence = ContentEvidenceSignals(BeautifulSoup(data['raw_html'], 'html.parser'), data['url'])
-    content_evidence.analyze()
 
     # 4. Top failures
     top_failures = revenue_scorer.get_top_failures(10)
