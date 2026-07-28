@@ -10,6 +10,7 @@ from config import TOTAL_CHECKS, TIER_NAMES, PRICING, SCORE_NAMES
 from scraper import WebsiteScraper
 from scorer import RevenueScorer
 from content_evidence_signals import ContentEvidenceSignals
+from bs4 import BeautifulSoup
 from reporter import ReportGenerator
 from email_sender import ReportEmailer
 
@@ -42,8 +43,7 @@ def run_demo():
     revenue_scorer = RevenueScorer(data)
     revenue_scorer.calculate_scores()
 
-    content_evidence = ContentEvidenceSignals(data)
-    content_evidence.analyze()
+    content_evidence = ContentEvidenceSignals(BeautifulSoup(data['raw_html'], 'html.parser'), data['url'])
 
     top_failures = revenue_scorer.get_top_failures(10)
     reporter = ReportGenerator(
@@ -74,11 +74,16 @@ def run_demo():
         print(f"   {icon} {label:<25} {score:>3}/100  ({status})")
 
     print(f"\n💰 REVENUE LEAK ESTIMATE:")
-    leak = free['revenue_leak_estimate']
-    print(f"   Monthly leak:   ${leak['monthly_leak_estimate']:,.2f}")
-    print(f"   Annual leak:    ${leak['annual_leak_estimate']:,.2f}")
-    print(f"   Current revenue: ${leak['current_monthly_revenue']:,.2f}/mo")
-    print(f"   Potential:      ${leak['potential_monthly_revenue']:,.2f}/mo")
+    if 'revenue_leak_estimate' in free:
+        leak = free['revenue_leak_estimate']
+        print(f"   Monthly leak:   ${leak['monthly_leak_estimate']:,.2f}")
+        print(f"   Annual leak:    ${leak['annual_leak_estimate']:,.2f}")
+        print(f"   Current revenue: ${leak['current_monthly_revenue']:,.2f}/mo")
+        print(f"   Potential:      ${leak['potential_monthly_revenue']:,.2f}/mo")
+    else:
+        teaser = free.get('revenue_leak_teaser', {})
+        print(f"   Gap:            {teaser.get('gap_percentage', 0)}/100")
+        print(f"   Note:           {teaser.get('note', 'N/A')}")
 
     print(f"\n📋 SCAN QUALITY: {free['scan_quality']}")
     print(f"   Severity:       {free['severity']['label']} ({free['severity']['key']})")

@@ -19,6 +19,7 @@ from config import (
 from scraper import WebsiteScraper
 from scorer import RevenueScorer
 from content_evidence_signals import ContentEvidenceSignals
+from bs4 import BeautifulSoup
 from reporter import ReportGenerator
 from email_sender import ReportEmailer
 
@@ -99,8 +100,7 @@ async def scan(request: ScanRequest, background_tasks: BackgroundTasks):
     revenue_scorer.calculate_scores()
 
     # 3. Content evidence
-    content_evidence = ContentEvidenceSignals(data)
-    content_evidence.analyze()
+    content_evidence = ContentEvidenceSignals(BeautifulSoup(data['raw_html'], 'html.parser'), data['url'])
 
     # 4. Top failures
     top_failures = revenue_scorer.get_top_failures(10)
