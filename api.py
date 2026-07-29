@@ -59,10 +59,13 @@ except ImportError:
 
 # RRS modules
 from config import (
-    PRICING, ADMIN_EMAIL, ADMIN_REPORT_AUTO_SEND, EMAIL_FROM, RESEND_API_KEY,
+    PRICING, ADMIN_EMAIL, ADMIN_REPORT_AUTO_SEND, EMAIL_FROM, RESEND_API_KEY as _CONFIG_RESEND_KEY,
     ADMIN_REPORT_INCLUDE_ROADMAP, ADMIN_REPORT_INCLUDE_COMPETITOR,
     REDIS_URL, RATE_LIMIT_FREE, RATE_LIMIT_PAID,
 )
+
+# Fallback: read Resend key directly from env (Railway/Render set it here)
+RESEND_API_KEY = os.environ.get("RESEND_API_KEY", _CONFIG_RESEND_KEY or "")
 from scraper import WebsiteScraper
 from scorer import RevenueScorer
 from content_evidence_signals import ContentEvidenceSignals
@@ -84,21 +87,17 @@ except ImportError:
 
 app = FastAPI(title="Revenue Readiness Scanner", version="4.1.0")
 
-# CORS — allow requests from your website and API subdomain
-_env = os.environ.get("ENV", "dev").lower()
+# CORS — allow requests from your website ONLY in production
 _origins = [
     "https://trilloka.com",
     "https://www.trilloka.com",
-    "https://api.trilloka.com",
 ]
-if _env == "dev":
+# Add localhost only in dev mode
+if os.environ.get("ENV", "dev").lower() == "dev":
     _origins.extend([
         "http://localhost:3000",
         "http://localhost:5173",
         "http://localhost:8000",
-        "http://localhost:8080",
-        "http://127.0.0.1:8000",
-        "http://127.0.0.1:8080",
     ])
 
 app.add_middleware(
@@ -106,9 +105,7 @@ app.add_middleware(
     allow_origins=_origins,
     allow_credentials=True,
     allow_methods=["GET", "POST", "OPTIONS"],
-    allow_headers=["Content-Type", "Authorization", "X-Requested-With"],
-    expose_headers=["X-Scan-ID"],
-    max_age=600,
+    allow_headers=["Content-Type", "Authorization"],
 )
 
 
@@ -277,6 +274,7 @@ async def _process_admin_report(url: str, domain: str, reporter: ReportGenerator
 
         # Email to admin via Resend (reliable delivery from Railway)
         if ADMIN_REPORT_AUTO_SEND and RESEND_API_KEY and RESEND_AVAILABLE:
+            print(f"[Resend] Attempting to send to {ADMIN_EMAIL} using key prefix: {RESEND_API_KEY[:8]}...")
             try:
                 resend.api_key = RESEND_API_KEY
                 resend.Emails.send({
@@ -292,11 +290,8 @@ async def _process_admin_report(url: str, domain: str, reporter: ReportGenerator
 
         # Fallback: try SMTP (may be blocked by Gmail from cloud IPs)
         try:
-            result = emailer.send_admin_report(reporter, ADMIN_EMAIL)
-            if result.get("mode") == "console":
-                print(f"[Admin email — CONSOLE MODE] {ADMIN_EMAIL} for {url} (SMTP not configured)")
-            else:
-                print(f"[Admin SMTP email sent] {ADMIN_EMAIL} for {url}")
+            emailer.send_admin_report(reporter, ADMIN_EMAIL)
+            print(f"[Admin SMTP email sent] {ADMIN_EMAIL} for {url}")
         except Exception as e:
             print(f"[Admin SMTP email failed — expected from cloud IPs] {e}")
 
