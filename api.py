@@ -12,7 +12,7 @@ from fastapi.responses import JSONResponse
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from bs4 import BeautifulSoup
 from fastapi.middleware.cors import CORSMiddleware
-from pydantic import BaseModel, HttpUrl
+from pydantic import BaseModel
 
 # ── Security: API Key for admin endpoints ──────────────────────────────────
 ADMIN_API_KEY = os.environ.get("ADMIN_API_KEY", "")
@@ -119,9 +119,9 @@ async def options_handler(path: str):
 # ── Request Models ──────────────────────────────────────────────────────────
 
 class ScanRequest(BaseModel):
-    url: HttpUrl
+    url: str  # Relaxed to str to allow auto-fixing missing http:// or https://
     tier: str = "free"  # free | paid | roadmap | admin
-    competitor_urls: Optional[List[HttpUrl]] = None
+    competitor_urls: Optional[List[str]] = None
     location: Optional[str] = ""
     traffic: Optional[int] = None
     conversion_rate: Optional[float] = None
@@ -162,9 +162,24 @@ async def payment_options():
 
 @app.post("/api/v1/scan")
 async def scan(request: ScanRequest, background_tasks: BackgroundTasks, http_request: Request):
-    url = str(request.url).rstrip("/")
+    # ── Auto-fix main URL protocol ──────────────────────────────────────────
+    raw_url = str(request.url).strip()
+    if not raw_url.startswith(("http://", "https://")):
+        raw_url = f"https://{raw_url}"
+    url = raw_url.rstrip("/")
+
     tier = request.tier.lower()
-    competitor_urls = [str(u).rstrip("/") for u in (request.competitor_urls or [])]
+
+    # ── Auto-fix competitor URLs protocol ────────────────────────────────────
+    competitor_urls = []
+    if request.competitor_urls:
+        for comp in request.competitor_urls:
+            comp_str = str(comp).strip()
+            if comp_str:
+                if not comp_str.startswith(("http://", "https://")):
+                    comp_str = f"https://{comp_str}"
+                competitor_urls.append(comp_str.rstrip("/"))
+
     location = request.location or ""
 
     # ── Rate limiting ─────────────────────────────────────────────────────
@@ -194,10 +209,10 @@ async def scan(request: ScanRequest, background_tasks: BackgroundTasks, http_req
     if tier not in ["free", "paid", "roadmap", "admin"]:
         raise HTTPException(status_code=400, detail="Invalid tier. Use: free, paid, roadmap, admin")
 
-    # 1. Scrape
+    # 1. Scrape (Force "admin" tier so full competitor & deep data is fetched for email reports)
     scraper = WebsiteScraper(
         url=url,
-        tier=tier,
+        tier="admin",
         competitor_urls=competitor_urls,
         location=location,
     )
@@ -235,7 +250,7 @@ async def scan(request: ScanRequest, background_tasks: BackgroundTasks, http_req
         calculator_inputs=calc_inputs if calc_inputs else None,
     )
 
-    # 7. Generate public report (what the customer sees)
+    # 7. Generate public report (what the visitor sees on website)
     if tier == "free":
         public_report = reporter.generate_free()
     elif tier == "paid":
@@ -245,7 +260,7 @@ async def scan(request: ScanRequest, background_tasks: BackgroundTasks, http_req
     else:  # admin
         public_report = reporter.generate_admin()
 
-    # 8. ALWAYS generate admin report + forwardable markdown (in background)
+    # 8. ALWAYS generate admin report + forwardable markdown (in background for your email)
     background_tasks.add_task(
         _process_admin_report,
         url=url,
