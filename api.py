@@ -170,9 +170,13 @@ async def scan(request: ScanRequest, background_tasks: BackgroundTasks, http_req
     location = request.location or ""
 
     # ── Rate limiting ─────────────────────────────────────────────────────
-    raw_limit = RATE_LIMIT_PAID if tier in ("paid", "roadmap", "admin") else RATE_LIMIT_FREE
-    limit = int(raw_limit) if raw_limit else 10
-    await rate_limit(http_request, max_requests=limit)
+   # NEW FIXED CODE:
+raw_limit = RATE_LIMIT_PAID if tier in ("paid", "roadmap", "admin") else RATE_LIMIT_FREE
+try:
+    limit = int(str(raw_limit).split('/')[0]) if raw_limit else 10
+except (ValueError, TypeError):
+    limit = 10
+await rate_limit(http_request, max_requests=limit)
 
     # ── Auto-detect location from IP if not provided ──────────────────────
     if not location and IP_GEO_AVAILABLE:
