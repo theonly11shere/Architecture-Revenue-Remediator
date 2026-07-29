@@ -305,6 +305,13 @@ li {{ margin: 4px 0; }}
             html += "</ul>"
         return html
 
+    def _six_score_status(self, value: int) -> str:
+        if value >= 80: return "excellent"
+        if value >= 60: return "good"
+        if value >= 40: return "fair"
+        if value >= 20: return "poor"
+        return "critical"
+
     def _render_admin_html(self, admin: Dict[str, Any]) -> str:
         scores = admin.get("six_scores", {})
         html = f"""
