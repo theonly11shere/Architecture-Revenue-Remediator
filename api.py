@@ -197,7 +197,7 @@ async def scan(request: ScanRequest, background_tasks: BackgroundTasks, http_req
     # 1. Scrape
     scraper = WebsiteScraper(
         url=url,
-        tier="admin",  # Always fetch full competitor & deep audit data for your admin report
+        tier=tier,
         competitor_urls=competitor_urls,
         location=location,
     )
