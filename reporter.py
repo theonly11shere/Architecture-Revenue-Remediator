@@ -134,7 +134,6 @@ class ReportGenerator:
                 "status": self._six_score_status(value),
             }
 
-        # FREE report: NO competitor data, NO fix steps, NO roadmap
         report = {
             "type": "free",
             "url": self.url,
@@ -155,7 +154,6 @@ class ReportGenerator:
             "content_sameness": self.data.get("content_sameness", {}),
             "visual_twin": self.data.get("visual_twin", {}),
             "revenue_exposure_teaser": self._revenue_teaser(),
-            # Revenue leak teaser only (not full breakdown)
             "revenue_leak_teaser": {
                 "gap_percentage": self.revenue_scorer.get_six_scores().get("revenue_leak", 0),
                 "note": "Upgrade for full revenue leak analysis with dollar estimates.",
@@ -165,7 +163,6 @@ class ReportGenerator:
             "ai_copy_analysis": self.data.get("ai_copy_analysis", {}),
             "form_friction": self.data.get("form_friction", {}),
             "tech_stack_impact": self.data.get("tech_stack_impact", {}),
-            # Competitor data INTENTIONALLY OMITTED from free report
         }
         if quality == "insufficient":
             report["insufficient_scan_message"] = (
@@ -182,7 +179,7 @@ class ReportGenerator:
             "differentiation": "Differentiation",
             "trust_credibility": "Trust & Credibility",
             "conversion_friction": "Conversion Friction",
-            "ai_copy_cliche": "AI Copy & Cliché",
+            "copy_originality": "Copy Originality",
             "tech_stack_impact": "Tech Stack Impact",
             "revenue_leak": "Revenue Leak",
         }
@@ -204,7 +201,6 @@ class ReportGenerator:
         free_report["type"] = "paid"
         free_report["upgrade_cta"] = "Full report with actionable fix steps and competitor analysis."
 
-        # Add fix steps
         fix_steps = []
         btype = self.data.get("business_type", {}).get("detected_type", "unknown")
         for f in self.top_failures:
@@ -215,13 +211,9 @@ class ReportGenerator:
                 "fix_steps": self._generate_fix_steps(f, btype),
             })
         free_report["fix_steps"] = fix_steps
-
-        # Add full revenue leak estimate (was teaser only in free)
         free_report["revenue_leak_estimate"] = self.revenue_scorer.get_revenue_leak_estimate()
-        # Remove the teaser
         free_report.pop("revenue_leak_teaser", None)
 
-        # Add competitor analysis (PAID ONLY)
         comp = self.data.get("competitor_analysis", {})
         if comp:
             free_report["competitor_analysis"] = {
@@ -252,7 +244,6 @@ class ReportGenerator:
         sev_order = {"critical": 0, "high": 1, "medium": 2, "low": 3}
         ordered = sorted(self.top_failures, key=lambda f: sev_order.get(str(f.get("severity", "low")).lower(), 3))
 
-        # ── ALWAYS create 4 weeks, distribute evenly ────────────────────
         total = len(ordered)
         if total >= 4:
             per_week = total // 4
@@ -291,7 +282,6 @@ class ReportGenerator:
             items = buckets[i] if i < len(buckets) else []
             week_items = []
 
-            # Add failure items with comprehensive fix steps
             for failure in items:
                 week_items.append({
                     "item": failure.get("human_name", failure.get("item", "")).replace("_", " ").title(),
@@ -299,7 +289,6 @@ class ReportGenerator:
                     "steps": self._generate_fix_steps(failure, btype, comp_results, comp_features),
                 })
 
-            # Add competitor differentiation tasks if week is light
             if len(week_items) < 2 and comp_features:
                 feat = comp_features.pop(0)
                 week_items.append({
@@ -315,7 +304,6 @@ class ReportGenerator:
                     ],
                 })
 
-            # Add continuous improvement if still empty
             if not week_items:
                 week_items.append({
                     "item": "Continuous improvement & competitor monitoring",
@@ -339,19 +327,16 @@ class ReportGenerator:
         report["roadmap"] = weeks
         return report
 
-
     # ════════════════════════════════════════════════════════════════════════
     #  ADMIN REPORT — Full raw data, all checkpoints, competitor gaps
     # ════════════════════════════════════════════════════════════════════════
 
     def generate_admin(self) -> Dict[str, Any]:
         """Full admin report with EVERYTHING — raw data, all failures, competitor gaps, roadmap."""
-        # Start with paid report (has fix steps + competitor analysis)
         report = self.generate_paid()
         report["type"] = "admin"
         report["branding"] = ADMIN_REPORT_BRANDING
 
-        # Add full raw data dump
         report["_raw_data"] = {
             "html_length": self.data.get("html_length", 0),
             "pages_sampled": self.data.get("pages_sampled", 0),
@@ -369,28 +354,20 @@ class ReportGenerator:
             "screenshots": self.data.get("screenshots", []),
         }
 
-        # Add ALL failures (not just top 10)
         report["all_failures"] = self.top_failures
         report["total_failure_count"] = len(self.top_failures)
-
-        # Add full revenue leak estimate
         report["revenue_leak_estimate"] = self.revenue_scorer.get_revenue_leak_estimate()
 
-        # Add competitor deep-dive (if enabled)
         if ADMIN_REPORT_INCLUDE_COMPETITOR:
             comp = self.data.get("competitor_analysis", {})
             report["competitor_deep_dive"] = comp
             report["competitor_gaps"] = comp.get("aggregate_missing_features", [])
 
-        # Add roadmap (if enabled)
         if ADMIN_REPORT_INCLUDE_ROADMAP:
             roadmap_report = self.generate_roadmap()
             report["roadmap"] = roadmap_report.get("roadmap", [])
 
-        # Add calculator inputs used
         report["calculator_inputs"] = self.calculator_inputs or {}
-
-        # Add scan metadata
         report["scan_metadata"] = {
             "scan_quality": self._scan_quality(),
             "timestamp": self.data.get("timestamp", ""),
@@ -421,13 +398,11 @@ class ReportGenerator:
         lines.append("---")
         lines.append("")
 
-        # Executive Summary
         lines.append("## Executive Summary")
         lines.append(f"**Overall Readiness:** {readiness}/100")
         lines.append(f"**Status:** {severity.get('label', 'Unknown')} — {severity.get('desc', '')}")
         lines.append("")
 
-        # Six Scores
         lines.append("## Revenue Health Breakdown")
         for name, info in six_scores.items():
             label = info.get("label", name)
@@ -436,7 +411,6 @@ class ReportGenerator:
             lines.append(f"- **{label}:** {score}/100 ({status})")
         lines.append("")
 
-        # Top Issues
         lines.append("## Top Priority Issues")
         visible = admin.get("visible_failures", [])
         if visible:
@@ -451,7 +425,6 @@ class ReportGenerator:
             lines.append("No critical issues detected. Great job!")
         lines.append("")
 
-        # Fix Steps (first 3 failures)
         fix_steps = admin.get("fix_steps", [])
         if fix_steps:
             lines.append("## Recommended Actions")
@@ -463,7 +436,6 @@ class ReportGenerator:
                     lines.append(f"- {step}")
                 lines.append("")
 
-        # Competitor Snapshot
         comp = admin.get("competitor_analysis", {})
         if comp and comp.get("competitor_count", 0) > 0:
             lines.append("## Competitive Landscape")
@@ -476,7 +448,6 @@ class ReportGenerator:
                     lines.append(f"- {feat}")
             lines.append("")
 
-        # Revenue Exposure
         teaser = admin.get("revenue_exposure_teaser", {})
         if teaser:
             cons = teaser.get("conservative_scenario", {})
@@ -485,7 +456,6 @@ class ReportGenerator:
             lines.append(f"**Monthly Profit:** ${cons.get('monthly_profit', 0):,.2f}")
             lines.append("")
 
-        # Future Prediction
         pred = admin.get("future_prediction", {})
         if pred:
             lines.append("## Projected Improvement")
@@ -494,7 +464,6 @@ class ReportGenerator:
             lines.append(f"- 12 months: {pred.get('12', 0)}/100")
             lines.append("")
 
-        # Roadmap teaser
         roadmap = admin.get("roadmap", [])
         if roadmap:
             lines.append("## 4-Week Action Roadmap")
@@ -514,47 +483,35 @@ class ReportGenerator:
 
     def _generate_fix_steps(self, failure: Dict[str, Any], business_type: str = "unknown",
                             comp_results: List[Dict] = None, comp_features: List[str] = None) -> List[str]:
-        """Generate 6-8 diverse, multi-angle fix steps for any failure.
-
-        Each failure gets solutions covering:
-        1. Technical implementation
-        2. Content/copy improvements
-        3. Design/UX enhancements
-        4. Trust/social proof
-        5. SEO/discoverability
-        6. Competitor differentiation (what they do + alternative approaches)
-        """
         item = failure.get("item", "").lower()
         human_name = failure.get("human_name", item.replace("_", " ").title())
         comp_results = comp_results or []
         comp_features = comp_features or []
 
-        # Build competitor context
         comp_domains = [c.get("domain", "competitor") for c in comp_results[:2]]
-        comp_note = " (vs. " + ", ".join(comp_domains) + ")" if comp_domains else ""
 
         if item == "check_ssl_valid":
             return [
-                "Technical: Install a valid SSL certificate (Let\'s Encrypt is free and auto-renews)",
+                "Technical: Install a valid SSL certificate (Let's Encrypt is free and auto-renews)",
                 "Technical: Force HTTPS redirect in your server config — no HTTP version should load",
                 "Technical: Check for mixed-content warnings using browser dev tools",
-                "Trust: Add a security badge or \'Secure Checkout\' message near forms and CTAs",
-                "Trust: Display your SSL provider\'s seal (DigiCert, Sectigo) in the footer",
+                "Trust: Add a security badge or 'Secure Checkout' message near forms and CTAs",
+                "Trust: Display your SSL provider's seal (DigiCert, Sectigo) in the footer",
                 "Competitor: Check if competitors show security indicators — match or exceed their visibility",
-                "Differentiate: Instead of just an SSL badge, add a \'256-bit Encrypted\' callout near your primary CTA",
+                "Differentiate: Instead of just an SSL badge, add a '256-bit Encrypted' callout near your primary CTA",
                 "SEO: Submit your HTTPS sitemap to Google Search Console and request re-indexing",
             ]
 
         if item == "check_contact":
             return [
                 "Technical: Add clickable phone (tel:) and mailto: links in header AND footer",
-                "Content: Write a compelling \'Contact Us\' page with multiple methods (phone, email, form, chat)",
-                "Design: Make contact info sticky on mobile so it\'s always one tap away",
+                "Content: Write a compelling 'Contact Us' page with multiple methods (phone, email, form, chat)",
+                "Design: Make contact info sticky on mobile so it's always one tap away",
                 "Trust: Add a real physical address with embedded Google Maps",
-                "Trust: Display business hours prominently — \'Open Now\' vs \'Closed\' builds instant credibility",
+                "Trust: Display business hours prominently — 'Open Now' vs 'Closed' builds instant credibility",
                 "Competitor: See how competitors display contact info — if they hide it, make yours impossible to miss",
-                "Differentiate: Add a \'Call Back in 15 Minutes\' promise instead of just a phone number",
-                "UX: Use a floating \'Chat with us\' widget that appears after 10 seconds on page",
+                "Differentiate: Add a 'Call Back in 15 Minutes' promise instead of just a phone number",
+                "UX: Use a floating 'Chat with us' widget that appears after 10 seconds on page",
             ]
 
         if item == "check_about":
@@ -562,10 +519,10 @@ class ReportGenerator:
                 "Content: Write an About page that tells YOUR story — founder journey, mission, why you started",
                 "Content: Include 3 specific facts (year founded, customers served, cities covered)",
                 "Trust: Add real team photos with names and roles — avoid stock images",
-                "Trust: Embed a 60-second \'Meet the Team\' video — video builds 3x more trust than text",
+                "Trust: Embed a 60-second 'Meet the Team' video — video builds 3x more trust than text",
                 "SEO: Add Organization schema markup with logo, address, and social profiles",
-                "Competitor: Read competitor About pages — find what they\'re missing and do THAT",
-                "Differentiate: Create a \'Our Promise to You\' manifesto speaking directly to customer fears",
+                "Competitor: Read competitor About pages — find what they're missing and do THAT",
+                "Differentiate: Create a 'Our Promise to You' manifesto speaking directly to customer fears",
                 "Design: Use a timeline layout showing key milestones — visual storytelling beats walls of text",
             ]
 
@@ -578,18 +535,18 @@ class ReportGenerator:
                 "Alternative: If solo founder, show yourself with clients, at work, or speaking at events",
                 "Competitor: Check if competitors use stock photos — your real photos are an instant differentiator",
                 "UX: Make team photos clickable to reveal short bios or LinkedIn profiles",
-                "Content: Add a \'Join Our Team\' section — shows growth and attracts talent",
+                "Content: Add a 'Join Our Team' section — shows growth and attracts talent",
             ]
 
         if item == "check_reviews":
             return [
                 "Technical: Embed Google Reviews widget directly on your homepage (free, auto-updates)",
-                "Trust: Create a \'Wall of Love\' page with 10+ detailed testimonials including names and photos",
+                "Trust: Create a 'Wall of Love' page with 10+ detailed testimonials including names and photos",
                 "Content: Reach out to 5 past customers TODAY asking for a 2-sentence testimonial",
                 "Trust: Add star ratings next to product/service names — even 4.2 stars beats no rating",
                 "Design: Use testimonial cards with customer photos, not just text quotes",
                 "Competitor: See which review platforms competitors use — dominate the ONE they ignore",
-                "Differentiate: Instead of generic 5-star reviews, showcase \'before/after\' stories with metrics",
+                "Differentiate: Instead of generic 5-star reviews, showcase 'before/after' stories with metrics",
                 "SEO: Add Review schema markup so stars appear in Google search results",
             ]
 
@@ -597,33 +554,33 @@ class ReportGenerator:
             return [
                 "Technical: Generate a privacy policy using Termly or Iubenda (free tier available)",
                 "Trust: Make the privacy policy link visible in footer AND checkout flow",
-                "Content: Write a human-readable summary (\'Here\'s what we do with your data\') above legal text",
-                "Trust: Add a \'We never sell your data\' badge near email capture forms",
-                "Technical: Implement cookie consent that respects user choices (not just \'Accept All\')",
+                "Content: Write a human-readable summary ('Here's what we do with your data') above legal text",
+                "Trust: Add a 'We never sell your data' badge near email capture forms",
+                "Technical: Implement cookie consent that respects user choices (not just 'Accept All')",
                 "Competitor: Check if competitors have GDPR/CCPA compliance — being compliant is a trust advantage",
-                "Differentiate: Publish a \'Data Transparency Report\' showing what you collect and why",
+                "Differentiate: Publish a 'Data Transparency Report' showing what you collect and why",
                 "SEO: Link to privacy policy from every page footer",
             ]
 
         if item == "check_terms":
             return [
                 "Technical: Generate Terms of Service via Termly or Rocket Lawyer tailored to your business",
-                "Trust: Highlight key terms in plain English (\'No hidden fees, cancel anytime\') at the top",
+                "Trust: Highlight key terms in plain English ('No hidden fees, cancel anytime') at the top",
                 "Content: Add a FAQ section addressing common concerns (refunds, shipping, cancellations)",
-                "Trust: Display a \'30-Day Money-Back Guarantee\' badge if applicable",
+                "Trust: Display a '30-Day Money-Back Guarantee' badge if applicable",
                 "Design: Make Terms link easy to find in footer + checkout page",
                 "Competitor: See if competitors bury unfair terms — being transparent builds loyalty",
-                "Differentiate: Create a \'Fair Deal Guarantee\' that goes beyond legal terms",
+                "Differentiate: Create a 'Fair Deal Guarantee' that goes beyond legal terms",
                 "SEO: Add FAQ schema to your terms page for rich snippets",
             ]
 
         if item == "check_domain_age":
             return [
-                "Trust: If domain is new, prominently display \'Established [Year]\' or years in business",
-                "Content: Create a \'Our Journey\' timeline showing milestones since launch",
+                "Trust: If domain is new, prominently display 'Established [Year]' or years in business",
+                "Content: Create a 'Our Journey' timeline showing milestones since launch",
                 "Trust: Partner with an established brand or mention media coverage to borrow credibility",
-                "Trust: Display \'As seen on...\' logos if you\'ve been featured anywhere",
-                "Differentiate: If you\'re new, lean into it — \'Fresh approach, modern methods, no outdated baggage\'",
+                "Trust: Display 'As seen on...' logos if you've been featured anywhere",
+                "Differentiate: If you're new, lean into it — 'Fresh approach, modern methods, no outdated baggage'",
                 "Competitor: Older competitors may look outdated — use your newness as a speed/agility advantage",
                 "Content: Publish thought leadership to build authority faster than domain age alone",
                 "SEO: Focus on long-tail keywords where domain age matters less than content quality",
@@ -631,25 +588,25 @@ class ReportGenerator:
 
         if item == "check_cta":
             return [
-                "Design: Place PRIMARY CTA (\'Book Now\', \'Get Quote\') in hero section — above fold on ALL devices",
-                "Content: Use action-oriented button text — \'Get My Free Estimate\' beats \'Submit\' by 30%+",
+                "Design: Place PRIMARY CTA ('Book Now', 'Get Quote') in hero section — above fold on ALL devices",
+                "Content: Use action-oriented button text — 'Get My Free Estimate' beats 'Submit' by 30%+",
                 "Design: Make CTA button a contrasting color — it should POP against your brand palette",
                 "UX: Add a sticky CTA bar on mobile that follows the user as they scroll",
-                "Trust: Place social proof (\'Join 500+ happy customers\') directly above or below the CTA",
+                "Trust: Place social proof ('Join 500+ happy customers') directly above or below the CTA",
                 "Competitor: Count how many CTAs competitors have on their homepage — match or exceed",
-                "Differentiate: Instead of one CTA, offer a CHOICE: \'Start Free Trial\' OR \'Watch 2-Min Demo\'",
+                "Differentiate: Instead of one CTA, offer a CHOICE: 'Start Free Trial' OR 'Watch 2-Min Demo'",
                 "A/B Test: Test CTA color, text, and placement weekly until conversion rate improves 15%+",
             ]
 
         if item == "check_mobile_real":
             return [
-                "Technical: Add proper viewport meta tag: <meta name=\'viewport\' content=\'width=device-width, initial-scale=1\'>",
+                "Technical: Add proper viewport meta tag: <meta name='viewport' content='width=device-width, initial-scale=1'>",
                 "Design: Test EVERY page on actual iPhone and Android devices, not just browser resize",
                 "UX: Ensure all tap targets are at least 44x44px (Apple HIG standard)",
                 "Design: Use responsive breakpoints at 320px, 375px, 414px, and 768px",
-                "Content: Keep mobile headlines under 40 characters so they don\'t wrap awkwardly",
+                "Content: Keep mobile headlines under 40 characters so they don't wrap awkwardly",
                 "Competitor: Load competitor sites on your phone — note what they do better on mobile",
-                "Differentiate: Add mobile-exclusive features like \'Tap to Call\' or \'Add to Home Screen\' prompt",
+                "Differentiate: Add mobile-exclusive features like 'Tap to Call' or 'Add to Home Screen' prompt",
                 "Technical: Use Chrome DevTools Lighthouse mobile audit — fix every flagged issue",
             ]
 
@@ -668,36 +625,36 @@ class ReportGenerator:
         if item == "check_booking":
             return [
                 "Technical: Integrate Calendly, Acuity, or SimplyBook.me for instant online scheduling",
-                "Content: Write booking page copy that removes friction — \'Pick a time that works for you\'",
-                "Design: Add a \'Book Now\' button in the header, hero, and footer — three chances to convert",
-                "Trust: Show available slots in real-time — scarcity drives action (\'Only 3 slots left this week\')",
+                "Content: Write booking page copy that removes friction — 'Pick a time that works for you'",
+                "Design: Add a 'Book Now' button in the header, hero, and footer — three chances to convert",
+                "Trust: Show available slots in real-time — scarcity drives action ('Only 3 slots left this week')",
                 "UX: Reduce booking form to 3 fields max: Name, Email, Phone — ask everything else later",
                 "Competitor: Check if competitors require phone calls to book — online booking is your edge",
-                "Differentiate: Offer \'Instant Confirmation\' vs. competitors\' \'We\'ll call you back\' approach",
-                "SEO: Add BookAction schema markup so Google shows \'Book Online\' button in search results",
+                "Differentiate: Offer 'Instant Confirmation' vs. competitors' 'We'll call you back' approach",
+                "SEO: Add BookAction schema markup so Google shows 'Book Online' button in search results",
             ]
 
         if item == "check_phone":
             return [
-                "Technical: Add tel: links to ALL phone numbers: <a href=\'tel:+1234567890\'>Call Us</a>",
+                "Technical: Add tel: links to ALL phone numbers: <a href='tel:+1234567890'>Call Us</a>",
                 "Design: Make the phone number a prominent button on mobile (sticky header or floating action)",
-                "Content: Add \'Call Now — We\'re Available\' with current hours next to the phone number",
-                "Trust: Display \'Average answer time: under 30 seconds\' if true — sets expectation",
-                "UX: Add a \'Request Callback\' form for visitors who can\'t call right now",
+                "Content: Add 'Call Now — We're Available' with current hours next to the phone number",
+                "Trust: Display 'Average answer time: under 30 seconds' if true — sets expectation",
+                "UX: Add a 'Request Callback' form for visitors who can't call right now",
                 "Competitor: Check if competitors hide their phone number — being accessible builds trust",
-                "Differentiate: Offer a \'Text Us\' option (SMS) alongside calling — younger audiences prefer it",
+                "Differentiate: Offer a 'Text Us' option (SMS) alongside calling — younger audiences prefer it",
                 "SEO: Add LocalBusiness schema with phone number for rich results",
             ]
 
         if item == "check_email_capture":
             return [
                 "Technical: Add an email capture form above the fold — not buried in the footer",
-                "Content: Offer a compelling lead magnet: \'Free Guide\', \'10% Off\', \'Exclusive Tips\'",
+                "Content: Offer a compelling lead magnet: 'Free Guide', '10% Off', 'Exclusive Tips'",
                 "Design: Use a two-step opt-in: click button → popup form (higher conversion than inline)",
-                "Trust: Add \'Join 2,000+ subscribers\' or \'No spam, unsubscribe anytime\' below the form",
+                "Trust: Add 'Join 2,000+ subscribers' or 'No spam, unsubscribe anytime' below the form",
                 "UX: Keep form to ONE field (email) initially — ask name later in the welcome sequence",
                 "Competitor: See what lead magnets competitors offer — create something 10x more valuable",
-                "Differentiate: Instead of a generic newsletter, offer a \'Weekly [Industry] Insider Report\'",
+                "Differentiate: Instead of a generic newsletter, offer a 'Weekly [Industry] Insider Report'",
                 "Technical: Set up automated welcome email sequence (3-5 emails) to nurture new subscribers",
             ]
 
@@ -706,19 +663,19 @@ class ReportGenerator:
                 "Content: Create a clear pricing page with at least 3 tiers (Good/Better/Best strategy)",
                 "Trust: Show pricing on the homepage or link prominently — hidden pricing kills trust",
                 "Design: Use anchoring — show the most expensive plan first, then the popular middle plan",
-                "Content: Add a \'Most Popular\' badge to the plan you want most customers to choose",
-                "Trust: Include \'No hidden fees\', \'Cancel anytime\', \'Money-back guarantee\' near pricing",
+                "Content: Add a 'Most Popular' badge to the plan you want most customers to choose",
+                "Trust: Include 'No hidden fees', 'Cancel anytime', 'Money-back guarantee' near pricing",
                 "Competitor: Mystery-shop competitors to see their pricing structure — match or undercut",
-                "Differentiate: Offer a \'Pay What You Can\' or sliding scale option competitors don\'t have",
-                "UX: Add a pricing calculator or \'Build Your Package\' interactive tool",
+                "Differentiate: Offer a 'Pay What You Can' or sliding scale option competitors don't have",
+                "UX: Add a pricing calculator or 'Build Your Package' interactive tool",
             ]
 
         if item == "check_testimonials":
             return [
                 "Content: Reach out to 10 past customers this week asking for specific results-based testimonials",
-                "Trust: Use video testimonials — 30-second clips on a \'Wall of Love\' page",
+                "Trust: Use video testimonials — 30-second clips on a 'Wall of Love' page",
                 "Design: Create testimonial cards with customer photo, name, company, and specific metric",
-                "Content: Ask for testimonials that answer: \'What was the problem? What did we do? What was the result?\'",
+                "Content: Ask for testimonials that answer: 'What was the problem? What did we do? What was the result?'",
                 "Trust: Add industry-specific badges or certifications next to relevant testimonials",
                 "Competitor: See if competitors use generic testimonials — yours should include specific numbers",
                 "Differentiate: Create case studies (500+ words) for your top 3 success stories — deep beats wide",
@@ -729,47 +686,47 @@ class ReportGenerator:
             return [
                 "Technical: Ensure every page has a unique <title> under 60 characters",
                 "Content: Put primary keyword at the START of the title, not the end",
-                "Content: Add a benefit or hook: \'Best Pizza in Chicago | Mario\'s — Fresh Daily\'",
-                "SEO: Include brand name at the end of titles for recognition: \'... | YourBrand\'",
-                "Technical: Use dynamic title tags for product/service pages: \'[Product] — [Category] | [Brand]\'",
+                "Content: Add a benefit or hook: 'Best Pizza in Chicago | Mario's — Fresh Daily'",
+                "SEO: Include brand name at the end of titles for recognition: '... | YourBrand'",
+                "Technical: Use dynamic title tags for product/service pages: '[Product] — [Category] | [Brand]'",
                 "Competitor: Search your target keyword on Google — see what titles rank top 3, then write better ones",
-                "Differentiate: Use emotional triggers competitors ignore: \'Finally, a [service] that actually works\'",
+                "Differentiate: Use emotional triggers competitors ignore: 'Finally, a [service] that actually works'",
                 "A/B Test: Test title variations in Google Ads first, then apply the winner to organic titles",
             ]
 
         if item == "check_meta":
             return [
                 "Technical: Write unique meta descriptions for EVERY page (150-160 characters)",
-                "Content: Include a CTA in the meta description: \'Learn how...\', \'Discover...\', \'Get started today...\'",
-                "Content: Mention a specific benefit or number: \'Save 20% on...\', \'Trusted by 500+...\'",
+                "Content: Include a CTA in the meta description: 'Learn how...', 'Discover...', 'Get started today...'",
+                "Content: Mention a specific benefit or number: 'Save 20% on...', 'Trusted by 500+...'",
                 "SEO: Include target keyword naturally — Google bolds it in search results",
                 "Technical: Use dynamic meta descriptions for product pages with price and availability",
                 "Competitor: Read competitor meta descriptions in search results — write ones that stand out",
-                "Differentiate: Use curiosity gaps competitors don\'t: \'The [industry] secret most businesses miss...\'",
+                "Differentiate: Use curiosity gaps competitors don't: 'The [industry] secret most businesses miss...'",
                 "A/B Test: Track CTR in Google Search Console — rewrite descriptions under 2% CTR",
             ]
 
         if item == "check_h1":
             return [
                 "Technical: Ensure EVERY page has exactly ONE <h1> tag — no more, no less",
-                "Content: Make H1 descriptive and keyword-rich: \'Affordable Web Design for Small Business\'",
+                "Content: Make H1 descriptive and keyword-rich: 'Affordable Web Design for Small Business'",
                 "Design: Style H1 to be the largest text on the page — visual hierarchy matters",
-                "Content: H1 should answer the visitor\'s question in 6-10 words max",
+                "Content: H1 should answer the visitor's question in 6-10 words max",
                 "SEO: Include primary keyword in H1 but keep it natural and readable",
-                "Competitor: Check competitor H1s — if they use generic \'Welcome\', you win with specificity",
-                "Differentiate: Use a question H1 if competitors use statements: \'Need a [solution] that actually works?\'",
+                "Competitor: Check competitor H1s — if they use generic 'Welcome', you win with specificity",
+                "Differentiate: Use a question H1 if competitors use statements: 'Need a [solution] that actually works?'",
                 "Technical: Ensure H1 is visible above the fold on mobile — not hidden behind images",
             ]
 
         if item == "check_alt":
             return [
-                "Technical: Add descriptive alt text to ALL images: \'Chef Maria preparing handmade pasta\'",
+                "Technical: Add descriptive alt text to ALL images: 'Chef Maria preparing handmade pasta'",
                 "Content: Include target keywords naturally in 2-3 image alt texts per page",
-                "SEO: Use alt text to describe the image\'s PURPOSE, not just its appearance",
-                "Design: Ensure decorative images have empty alt=\'\' so screen readers skip them",
+                "SEO: Use alt text to describe the image's PURPOSE, not just its appearance",
+                "Design: Ensure decorative images have empty alt='' so screen readers skip them",
                 "Technical: Audit all images with Screaming Frog or Sitebulb to find missing alt text",
                 "Competitor: Check if competitor images have alt text — accessible sites rank higher",
-                "Differentiate: Use original photography with descriptive alt text vs. competitors\' stock images",
+                "Differentiate: Use original photography with descriptive alt text vs. competitors' stock images",
                 "SEO: Add ImageObject schema markup for key product/service images",
             ]
 
@@ -779,21 +736,21 @@ class ReportGenerator:
                 "Technical: Add LocalBusiness schema with address, phone, hours, and geo-coordinates",
                 "Technical: Add FAQPage schema to your FAQ section for rich snippets",
                 "Technical: Add Product schema with price, availability, and reviews for e-commerce",
-                "SEO: Use Google\'s Rich Results Test to validate all schema markup",
+                "SEO: Use Google's Rich Results Test to validate all schema markup",
                 "Competitor: Check if competitors have rich snippets in search — schema is how you get them",
-                "Differentiate: Add HowTo schema for tutorial content competitors don\'t have",
+                "Differentiate: Add HowTo schema for tutorial content competitors don't have",
                 "Technical: Implement breadcrumb schema for better navigation in search results",
             ]
 
         if item == "check_internal_links":
             return [
                 "Technical: Add 3-5 contextual internal links per page to related content",
-                "Content: Use descriptive anchor text — \'our pricing plans\' beats \'click here\'",
+                "Content: Use descriptive anchor text — 'our pricing plans' beats 'click here'",
                 "SEO: Create topic clusters — pillar page links to 5+ related subtopic pages",
-                "Design: Add \'Related Articles\' or \'You Might Also Like\' sections at page bottom",
+                "Design: Add 'Related Articles' or 'You Might Also Like' sections at page bottom",
                 "Technical: Ensure no orphan pages — every page should be reachable within 3 clicks from home",
                 "Competitor: Map competitor site structure — find content gaps you can fill with internal links",
-                "Differentiate: Create a \'Start Here\' page that links to your best content in logical order",
+                "Differentiate: Create a 'Start Here' page that links to your best content in logical order",
                 "SEO: Use breadcrumb navigation to reinforce site structure and internal linking",
             ]
 
@@ -812,10 +769,10 @@ class ReportGenerator:
         if item == "check_robots":
             return [
                 "Technical: Create robots.txt at domain root with clear allow/disallow rules",
-                "SEO: Add Sitemap directive to robots.txt: \'Sitemap: https://yoursite.com/sitemap.xml\'",
+                "SEO: Add Sitemap directive to robots.txt: 'Sitemap: https://yoursite.com/sitemap.xml'",
                 "Technical: Block admin pages, search results, and duplicate content from indexing",
                 "SEO: Allow CSS and JS files so Google can render pages correctly",
-                "Technical: Test robots.txt with Google\'s Robots Testing Tool before deploying",
+                "Technical: Test robots.txt with Google's Robots Testing Tool before deploying",
                 "Competitor: Check competitor robots.txt — see what they hide (might reveal strategy)",
                 "Differentiate: Use robots.txt to guide crawlers to your most important pages first",
                 "SEO: Add crawl-delay if your server struggles with bot traffic",
@@ -824,12 +781,12 @@ class ReportGenerator:
         if item == "check_unique":
             return [
                 "Content: Write original page copy — aim for 300+ words per page minimum",
-                "Content: Use your own data, case studies, and research — don\'t regurgitate industry stats",
+                "Content: Use your own data, case studies, and research — don't regurgitate industry stats",
                 "Content: Add original images, infographics, or videos that no competitor has",
                 "Technical: Check for duplicate content with Copyscape or Siteliner — fix or canonicalize",
                 "Content: Create content that ONLY you can create — your unique process, methodology, or story",
                 "Competitor: Read competitor content — find the gaps (depth, personality, specifics) and fill them",
-                "Differentiate: Publish \'behind the scenes\' content showing your actual process — transparency wins",
+                "Differentiate: Publish 'behind the scenes' content showing your actual process — transparency wins",
                 "SEO: Use canonical tags to consolidate duplicate pages and preserve link equity",
             ]
 
@@ -839,34 +796,34 @@ class ReportGenerator:
                 "Content: Use subheadings (H2, H3) every 200-300 words to guide scanning readers",
                 "Content: Replace jargon with plain language — write for an 8th-grade reading level",
                 "Design: Use bullet points and numbered lists for complex information",
-                "Content: Add a \'TL;DR\' summary at the top of long pages for busy readers",
+                "Content: Add a 'TL;DR' summary at the top of long pages for busy readers",
                 "Competitor: Run competitor pages through Hemingway Editor — beat their readability score",
-                "Differentiate: Use storytelling format (Problem → Agitation → Solution) vs. competitors\' dry lists",
+                "Differentiate: Use storytelling format (Problem → Agitation → Solution) vs. competitors' dry lists",
                 "Technical: Ensure font size is 16px+ on mobile — small text hurts readability AND conversions",
             ]
 
         if item == "check_services":
             return [
                 "Content: Create a dedicated page for EACH service with 500+ words of specific detail",
-                "Content: Include pricing ranges or \'Starting at\' numbers — specificity builds trust",
-                "Content: Add a \'Who This Is For / Who This Is NOT For\' section to qualify leads",
+                "Content: Include pricing ranges or 'Starting at' numbers — specificity builds trust",
+                "Content: Add a 'Who This Is For / Who This Is NOT For' section to qualify leads",
                 "Design: Use process diagrams showing exactly how your service works (3-5 steps)",
-                "Trust: Add case studies or results metrics for each service — \'We helped X achieve Y\'",
-                "Competitor: List competitor services — find the ONE they don\'t offer and make it your flagship",
-                "Differentiate: Package services in a unique way competitors haven\'t thought of — bundles, tiers, or subscriptions",
-                "SEO: Create service-area pages for each location you serve — \'Plumber in [City]\'",
+                "Trust: Add case studies or results metrics for each service — 'We helped X achieve Y'",
+                "Competitor: List competitor services — find the ONE they don't offer and make it your flagship",
+                "Differentiate: Package services in a unique way competitors haven't thought of — bundles, tiers, or subscriptions",
+                "SEO: Create service-area pages for each location you serve — 'Plumber in [City]'",
             ]
 
         if item == "check_blog":
             return [
                 "Content: Publish 1-2 blog posts per month targeting questions your customers actually ask",
-                "Content: Write \'ultimate guides\' (2000+ words) that comprehensively cover one topic",
-                "SEO: Target long-tail keywords with low competition — \'best [service] for [specific need]\'",
+                "Content: Write 'ultimate guides' (2000+ words) that comprehensively cover one topic",
+                "SEO: Target long-tail keywords with low competition — 'best [service] for [specific need]'",
                 "Content: Repurpose blog content into social posts, emails, and videos — maximize ROI",
                 "Trust: Add author bios with credentials to every blog post — builds E-E-A-T",
                 "Competitor: See what topics competitors rank for — create BETTER, deeper versions",
                 "Differentiate: Interview customers for blog content — their words are more persuasive than yours",
-                "Technical: Add \'Last Updated\' dates and refresh old posts quarterly to maintain rankings",
+                "Technical: Add 'Last Updated' dates and refresh old posts quarterly to maintain rankings",
             ]
 
         if item == "check_faq":
@@ -874,8 +831,8 @@ class ReportGenerator:
                 "Content: Create an FAQ page with 10-20 real questions from customers (check support emails)",
                 "Content: Write answers that are specific, not generic — include numbers, timeframes, and examples",
                 "SEO: Add FAQPage schema markup so questions appear directly in Google search results",
-                "Design: Use accordion/collapsible format so the page doesn\'t feel overwhelming",
-                "Trust: Include pricing-related FAQs — \'How much does it cost?\' should never be avoided",
+                "Design: Use accordion/collapsible format so the page doesn't feel overwhelming",
+                "Trust: Include pricing-related FAQs — 'How much does it cost?' should never be avoided",
                 "Competitor: Check competitor FAQ pages — answer the questions THEY avoid",
                 "Differentiate: Add video answers for your top 5 FAQs — multimedia content ranks better",
                 "UX: Link FAQ answers to relevant product/service pages for deeper exploration",
@@ -919,14 +876,14 @@ class ReportGenerator:
 
         if item == "check_canonical":
             return [
-                "Technical: Add canonical tags to every page: <link rel=\'canonical\' href=\'https://yoursite.com/page\'>",
+                "Technical: Add canonical tags to every page: <link rel='canonical' href='https://yoursite.com/page'>",
                 "Technical: Use self-referencing canonicals even on original pages — prevents scraper issues",
-                "SEO: For paginated content, use rel=\'next\' and rel=\'prev\' or proper canonical structure",
+                "SEO: For paginated content, use rel='next' and rel='prev' or proper canonical structure",
                 "Technical: Ensure canonical URLs use HTTPS and match your preferred domain (www vs non-www)",
-                "SEO: Check for canonicalized pages that shouldn\'t be — especially product variants and filters",
+                "SEO: Check for canonicalized pages that shouldn't be — especially product variants and filters",
                 "Competitor: See how competitors handle duplicate content (products, locations) — copy best practices",
                 "Differentiate: Use canonical tags strategically to consolidate thin content into authoritative pages",
-                "Technical: Validate canonicals with Screaming Frog — look for \'Canonicalised\' status codes",
+                "Technical: Validate canonicals with Screaming Frog — look for 'Canonicalised' status codes",
             ]
 
         if item == "check_structured":
@@ -935,9 +892,9 @@ class ReportGenerator:
                 "Technical: Add LocalBusiness schema with full address, geo-coordinates, and opening hours",
                 "Technical: Add BreadcrumbList schema for better navigation display in search results",
                 "SEO: Use Product schema for e-commerce with price, availability, and aggregateRating",
-                "Technical: Validate ALL schema with Google\'s Rich Results Test before deploying",
+                "Technical: Validate ALL schema with Google's Rich Results Test before deploying",
                 "Competitor: Search your target keywords — see which rich snippets competitors have, then get them too",
-                "Differentiate: Add HowTo or Recipe schema for tutorial content competitors don\'t have",
+                "Differentiate: Add HowTo or Recipe schema for tutorial content competitors don't have",
                 "SEO: Monitor Search Console for structured data errors and fix within 7 days",
             ]
 
@@ -948,24 +905,23 @@ class ReportGenerator:
                 "Technical: Add X-Frame-Options: DENY to prevent clickjacking attacks",
                 "Technical: Set X-Content-Type-Options: nosniff to prevent MIME-type sniffing",
                 "Technical: Add Referrer-Policy to control what data is sent with outbound links",
-                "Trust: Display a \'Secured by [Provider]\' badge if you have enterprise security",
+                "Trust: Display a 'Secured by [Provider]' badge if you have enterprise security",
                 "Competitor: Check competitor security headers on securityheaders.com — beat their score",
-                "Differentiate: Publish a security whitepaper or \'How We Protect Your Data\' page — transparency builds trust",
+                "Differentiate: Publish a security whitepaper or 'How We Protect Your Data' page — transparency builds trust",
             ]
 
         if item == "check_favicon":
             return [
                 "Technical: Create a favicon.ico (16x16, 32x32) and place it in the site root",
-                "Technical: Add <link rel=\'icon\' type=\'image/png\' sizes=\'32x32\' href=\'/favicon-32x32.png\'>",
+                "Technical: Add <link rel='icon' type='image/png' sizes='32x32' href='/favicon-32x32.png'>",
                 "Design: Ensure favicon is recognizable at 16x16 — simplify your logo if needed",
                 "Technical: Create Apple touch icons (180x180) for iOS home screen bookmarks",
-                "Technical: Add manifest.json for Android/Chrome \'Add to Home Screen\' functionality",
+                "Technical: Add manifest.json for Android/Chrome 'Add to Home Screen' functionality",
                 "Competitor: Check competitor favicons in browser tabs — a missing favicon looks unprofessional",
                 "Differentiate: Use an animated favicon or dynamic favicon that changes based on page context",
                 "Design: Test favicon visibility on both light and dark browser themes",
             ]
 
-        # Fallback: generate comprehensive generic steps
         return [
             "Technical: Audit and fix " + human_name + " using industry best practices and current standards",
             "Content: Rewrite or expand content related to " + human_name + " — add specifics, examples, and data",

@@ -3,7 +3,7 @@
 
 FIXES APPLIED:
 - calculate_scores() now works with actual scraper output (no more all-0)
-- Adds 6 unified scores: Differentiation, Trust, Conversion, AI Copy, Tech Stack, Revenue Leak
+- Adds 6 unified scores: Differentiation, Trust, Conversion, Copy Originality, Tech Stack, Revenue Leak
 - VisualTwinMatcher fixed to not false-positive when fingerprint DB is empty
 - VisualTwinMatcher now compares against actual competitor data
 - SocialSignalsFetcher enhanced with news/press search
@@ -28,7 +28,6 @@ from config import (
     REVENUE_LEAK_WEIGHTS, TECH_STACK_IMPACT, SCORE_NAMES,
 )
 
-# Try to import SSIM; fallback to simple pixel diff if not available
 try:
     from skimage.metrics import structural_similarity as ssim
     from PIL import Image
@@ -106,10 +105,6 @@ class ContentSamenessChecker:
 
 
 class VisualTwinMatcher:
-    """Real visual twin using screenshot SSIM comparison + side-by-side generation.
-    FIXED: No longer false-positives when fingerprint DB is empty.
-    NEW: Compares against actual competitor data when available."""
-
     def __init__(self, fingerprint: Dict[str, Any], competitor_visuals: Optional[List[Dict]] = None):
         self.fingerprint = fingerprint
         self.competitor_visuals = competitor_visuals or []
@@ -176,7 +171,6 @@ class VisualTwinMatcher:
         my_domain = self.fingerprint.get("domain", "").lower()
         my_screenshot = self.fingerprint.get("screenshot_path") or self.fingerprint.get("screenshot")
 
-        # NEW: Try competitor visuals first
         if self.competitor_visuals:
             comp_match = self._match_against_competitors(my_screenshot, my_domain)
             if comp_match:
@@ -185,7 +179,6 @@ class VisualTwinMatcher:
         if not my_screenshot or not os.path.exists(my_screenshot):
             return self._fallback_match()
 
-        # Check if DB has any valid entries
         db_has_entries = self._db_has_valid_entries(my_url, my_domain)
         if not db_has_entries:
             return {
@@ -257,9 +250,7 @@ class VisualTwinMatcher:
         }
 
     def _match_against_competitors(self, my_screenshot: Optional[str], my_domain: str) -> Optional[Dict]:
-        """NEW: Compare against actual competitor visual fingerprints."""
         if not my_screenshot or not os.path.exists(my_screenshot):
-            # Fallback to color/font vector comparison
             return self._match_competitors_fallback()
 
         closest = None
@@ -275,13 +266,12 @@ class VisualTwinMatcher:
                     closest = comp.get("url")
                     closest_comp = comp
             else:
-                # Vector comparison for competitors without screenshots
                 my_vec = self._vectorize(self.fingerprint)
                 comp_vec = self._vectorize(comp)
                 dist = self._distance(my_vec, comp_vec)
                 sim = max(0, min(100, int(100 - dist * 33)))
                 if sim > closest_score:
-                    closest_score = sim / 100.0  # Normalize to 0-1
+                    closest_score = sim / 100.0
                     closest = comp.get("url")
                     closest_comp = comp
 
@@ -312,7 +302,6 @@ class VisualTwinMatcher:
         }
 
     def _match_competitors_fallback(self) -> Optional[Dict]:
-        """Vector comparison when no screenshots available."""
         my_vec = self._vectorize(self.fingerprint)
         closest = None
         closest_dist = float("inf")
@@ -544,8 +533,6 @@ class RevenueScorer:
         self.completed_checks = 0
         self.six_scores: Dict[str, int] = {}
 
-    # ── Legacy 3-Score System (fixed to work with new scraper) ──────────────
-
     def calculate_scores(self) -> Dict[str, int]:
         categories = ["trust", "conversion", "seo", "content", "technical"]
         total_checks = 0
@@ -582,7 +569,6 @@ class RevenueScorer:
         severity_order = {"critical": 3, "high": 2, "medium": 1, "low": 0}
         categories = ["trust", "conversion", "seo", "content", "technical"]
 
-        # Build mapping from method name to human-readable name
         from config import CHECKPOINTS
         name_map = {}
         for cat_cfg in CHECKPOINTS.values():
@@ -607,14 +593,14 @@ class RevenueScorer:
         failures.sort(key=lambda x: severity_order.get(x["severity"], 0), reverse=True)
         return failures[:n]
 
-    # ── NEW: 6 Unified Scores ───────────────────────────────────────────────
+    # ── 6 Unified Scores ────────────────────────────────────────────────────
 
     def calculate_six_scores(self) -> Dict[str, int]:
         self.six_scores = {
             "differentiation": self._calc_differentiation_score(),
             "trust_credibility": self._calc_trust_score(),
             "conversion_friction": self._calc_conversion_score(),
-            "ai_copy_cliche": self._calc_ai_copy_score(),
+            "copy_originality": self._calc_copy_originality_score(),
             "tech_stack_impact": self._calc_tech_stack_score(),
             "revenue_leak": self._calc_revenue_leak_score(),
         }
@@ -640,7 +626,6 @@ class RevenueScorer:
         if similarity > 50:
             score -= min(25, (similarity - 50) // 2)
 
-        # Competitor gap bonus/penalty
         comp = self.data.get("competitor_analysis", {})
         if comp:
             gap = comp.get("gap_score", 100)
@@ -700,10 +685,10 @@ class RevenueScorer:
 
         return max(0, min(100, score))
 
-    def _calc_ai_copy_score(self) -> int:
+    def _calc_copy_originality_score(self) -> int:
         ai = self.data.get("ai_copy_analysis", {})
-        combined = ai.get("combined_score", 0)
-        return max(0, min(100, 100 - combined))
+        combined = ai.get("combined_score", 0)  # e.g., 99 (% AI match)
+        return max(0, min(100, 100 - combined)) # Inverted: 100 - 99 = 1/100 -> Critical
 
     def _calc_tech_stack_score(self) -> int:
         tech = self.data.get("tech_stack_impact", {})
