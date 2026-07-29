@@ -17,7 +17,6 @@ from pydantic import BaseModel, HttpUrl
 # ── Security: API Key for admin endpoints ──────────────────────────────────
 ADMIN_API_KEY = os.environ.get("ADMIN_API_KEY", "")
 if not ADMIN_API_KEY:
-    # Generate a random one if not set — log it so you can copy it
     import secrets
     ADMIN_API_KEY = secrets.token_urlsafe(32)
     print(f"[SECURITY] Generated temporary ADMIN_API_KEY: {ADMIN_API_KEY}")
@@ -64,7 +63,7 @@ from config import (
     REDIS_URL, RATE_LIMIT_FREE, RATE_LIMIT_PAID,
 )
 
-# Fallback: read Resend key directly from env (Railway/Render set it here)
+# Fallback: read Resend key directly from env
 RESEND_API_KEY = os.environ.get("RESEND_API_KEY", _CONFIG_RESEND_KEY or "")
 from scraper import WebsiteScraper
 from scorer import RevenueScorer
@@ -97,7 +96,6 @@ _origins = [
     "https://www.trilloka.com",
     "https://api.trilloka.com",
 ]
-# Add localhost only in dev mode
 if os.environ.get("ENV", "dev").lower() == "dev":
     _origins.extend([
         "http://localhost:3000",
@@ -170,25 +168,23 @@ async def scan(request: ScanRequest, background_tasks: BackgroundTasks, http_req
     location = request.location or ""
 
     # ── Rate limiting ─────────────────────────────────────────────────────
-   # NEW FIXED CODE:
-raw_limit = RATE_LIMIT_PAID if tier in ("paid", "roadmap", "admin") else RATE_LIMIT_FREE
-try:
-    limit = int(str(raw_limit).split('/')[0]) if raw_limit else 10
-except (ValueError, TypeError):
-    limit = 10
-await rate_limit(http_request, max_requests=limit)
+    raw_limit = RATE_LIMIT_PAID if tier in ("paid", "roadmap", "admin") else RATE_LIMIT_FREE
+    try:
+        limit_str = str(raw_limit).split('/')[0] if raw_limit else "10"
+        limit = int(limit_str)
+    except (ValueError, TypeError):
+        limit = 10
+    await rate_limit(http_request, max_requests=limit)
 
     # ── Auto-detect location from IP if not provided ──────────────────────
     if not location and IP_GEO_AVAILABLE:
         client_ip = get_client_ip(dict(http_request.headers))
-        # Do not geolocate localhost/private IPs
         if client_ip and not client_ip.startswith(("127.", "10.", "192.168.", "172.")):
             detected = get_location_from_ip(client_ip)
             if detected:
                 location = detected
                 print(f"[Auto-Location] IP {client_ip} -> {location}")
         elif not client_ip:
-            # Try without IP (ip-api will use the connection IP)
             detected = get_location_from_ip("")
             if detected:
                 location = detected
@@ -294,7 +290,7 @@ async def _process_admin_report(url: str, domain: str, reporter: ReportGenerator
         html_body = emailer._render_admin_html(admin_report)
         full_html = emailer._build_html_wrapper(f"[ADMIN] Revenue Readiness — {url}", html_body)
 
-        # Email to admin via Resend (reliable delivery from Railway)
+        # Email to admin via Resend
         if ADMIN_REPORT_AUTO_SEND and RESEND_API_KEY and RESEND_AVAILABLE:
             print(f"[Resend] Attempting to send to {ADMIN_EMAIL} using key prefix: {RESEND_API_KEY[:8]}...")
             try:
@@ -310,12 +306,11 @@ async def _process_admin_report(url: str, domain: str, reporter: ReportGenerator
             except Exception as e:
                 print(f"[Admin email failed] {e}")
         else:
-            # Fallback: try SMTP (may be blocked by Gmail from cloud IPs)
             try:
                 emailer.send_admin_report(reporter, ADMIN_EMAIL)
                 print(f"[Admin SMTP email sent] {ADMIN_EMAIL} for {url}")
             except Exception as e:
-                print(f"[Admin SMTP email failed — expected from cloud IPs] {e}")
+                print(f"[Admin SMTP email failed] {e}")
 
     except Exception as e:
         print(f"[Admin report processing failed] {e}")
@@ -344,7 +339,6 @@ async def list_admin_reports(limit: int = 20):
         except Exception as e:
             print(f"Redis fetch failed: {e}. Falling back to memory.")
             
-    # Memory fallback
     reports = []
     for k, v in list(_in_memory_reports.items())[:limit]:
         reports.append({
