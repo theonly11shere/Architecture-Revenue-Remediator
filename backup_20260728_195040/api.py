@@ -82,12 +82,7 @@ try:
 except ImportError:
     REDIS_AVAILABLE = False
 
-# ── In-memory fallback for admin reports (when Redis is unavailable) ───────
-_in_memory_reports = {}      # key -> json data
-_in_memory_forwardable = {}  # key -> markdown string
-_MAX_MEMORY_REPORTS = 100
-
-app = FastAPI(title="Revenue Readiness Scanner", version="4.1.1")
+app = FastAPI(title="Revenue Readiness Scanner", version="4.1.0")
 
 # CORS — allow requests from your website ONLY in production
 _origins = [
@@ -129,99 +124,6 @@ class HealthResponse(BaseModel):
     redis: bool
 
 
-# ── Helper: store report (Redis if available, else in-memory) ───────────────
-
-def _store_report(scan_id: str, admin_report: dict, forwardable_md: str):
-    """Save report to Redis if available, otherwise in-memory dict."""
-    if REDIS_AVAILABLE:
-        try:
-            r = redis.from_url(REDIS_URL)
-            r.setex(f"rrs:admin:{scan_id}", 86400 * 7, json.dumps(admin_report))
-            r.setex(f"rrs:forwardable:{scan_id}", 86400 * 7, forwardable_md)
-            return "redis"
-        except Exception as e:
-            print(f"[Redis save failed, falling back to memory] {e}")
-
-    # In-memory fallback
-    if len(_in_memory_reports) >= _MAX_MEMORY_REPORTS:
-        # Evict oldest
-        oldest = next(iter(_in_memory_reports))
-        _in_memory_reports.pop(oldest, None)
-        _in_memory_forwardable.pop(oldest, None)
-
-    _in_memory_reports[scan_id] = admin_report
-    _in_memory_forwardable[scan_id] = forwardable_md
-    return "memory"
-
-
-def _get_report(scan_id: str):
-    """Retrieve admin report from Redis or memory."""
-    if REDIS_AVAILABLE:
-        try:
-            r = redis.from_url(REDIS_URL)
-            data = r.get(f"rrs:admin:{scan_id}")
-            if data:
-                return json.loads(data), "redis"
-        except Exception:
-            pass
-
-    if scan_id in _in_memory_reports:
-        return _in_memory_reports[scan_id], "memory"
-
-    return None, None
-
-
-def _get_forwardable(scan_id: str):
-    """Retrieve forwardable markdown from Redis or memory."""
-    if REDIS_AVAILABLE:
-        try:
-            r = redis.from_url(REDIS_URL)
-            data = r.get(f"rrs:forwardable:{scan_id}")
-            if data:
-                return data.decode() if isinstance(data, bytes) else data, "redis"
-        except Exception:
-            pass
-
-    if scan_id in _in_memory_forwardable:
-        return _in_memory_forwardable[scan_id], "memory"
-
-    return None, None
-
-
-def _list_reports(limit: int = 20):
-    """List report IDs from Redis or memory."""
-    reports = []
-
-    if REDIS_AVAILABLE:
-        try:
-            r = redis.from_url(REDIS_URL)
-            keys = r.keys("rrs:admin:*")
-            keys = keys[:limit]
-            for key in keys:
-                key_str = key.decode() if isinstance(key, bytes) else key
-                data = r.get(key_str)
-                if data:
-                    reports.append({
-                        "id": key_str.replace("rrs:admin:", ""),
-                        "key": key_str,
-                        "size": len(data),
-                        "source": "redis",
-                    })
-            return reports
-        except Exception:
-            pass
-
-    # Memory fallback
-    for scan_id, data in list(_in_memory_reports.items())[:limit]:
-        reports.append({
-            "id": scan_id,
-            "key": f"rrs:admin:{scan_id}",
-            "size": len(json.dumps(data)),
-            "source": "memory",
-        })
-    return reports
-
-
 # ── Endpoints ───────────────────────────────────────────────────────────────
 
 @app.get("/api/health", response_model=HealthResponse)
@@ -233,7 +135,7 @@ async def health():
             redis_ok = r.ping()
         except Exception:
             pass
-    return {"status": "ok", "version": "4.1.1", "redis": redis_ok}
+    return {"status": "ok", "version": "4.1.0", "redis": redis_ok}
 
 
 @app.get("/api/v1/payment-options")
@@ -256,13 +158,8 @@ async def scan(request: ScanRequest, background_tasks: BackgroundTasks, http_req
     location = request.location or ""
 
     # ── Rate limiting ─────────────────────────────────────────────────────
-    # FIX: cast to int because config values may be strings
-    raw_limit = RATE_LIMIT_PAID if tier in ("paid", "roadmap", "admin") else RATE_LIMIT_FREE
-    try:
-        limit = int(raw_limit)
-    except (TypeError, ValueError):
-        limit = 10
-    await rate_limit(http_request, max_requests=limit)
+    limit = RATE_LIMIT_PAID if tier in ("paid", "roadmap", "admin") else RATE_LIMIT_FREE
+    await rate_limit(http_request, max_requests=limit or 10)
 
     # ── Auto-detect location from IP if not provided ──────────────────────
     if not location and IP_GEO_AVAILABLE:
@@ -350,16 +247,21 @@ async def scan(request: ScanRequest, background_tasks: BackgroundTasks, http_req
 # ── Admin Report Background Task ────────────────────────────────────────────
 
 async def _process_admin_report(url: str, domain: str, reporter: ReportGenerator, data: dict):
-    """Generates admin report, saves to Redis/memory, emails pretty HTML to admin via Resend."""
+    """Generates admin report, saves to Redis, emails pretty HTML to admin via Resend."""
     try:
         # Generate admin report
         admin_report = reporter.generate_admin()
         forwardable_md = reporter.generate_forwardable_report()
 
-        # Save (Redis if available, else memory)
+        # Save to Redis (if available)
         scan_id = f"{datetime.utcnow().isoformat().replace(':', '-')}-{domain}"
-        source = _store_report(scan_id, admin_report, forwardable_md)
-        print(f"[Admin report saved] {scan_id} -> {source}")
+        if REDIS_AVAILABLE:
+            try:
+                r = redis.from_url(REDIS_URL)
+                r.setex(f"rrs:admin:{scan_id}", 86400 * 7, json.dumps(admin_report))
+                r.setex(f"rrs:forwardable:{scan_id}", 86400 * 7, forwardable_md)
+            except Exception as e:
+                print(f"[Redis save failed] {e}")
 
         # Generate pretty HTML using email_sender
         from email_sender import ReportEmailer
@@ -397,10 +299,23 @@ async def _process_admin_report(url: str, domain: str, reporter: ReportGenerator
 
 @app.get("/api/v1/admin/reports", dependencies=[Depends(verify_admin)])
 async def list_admin_reports(limit: int = 20):
-    """List recent admin reports from Redis or memory. Owner only."""
+    """List recent admin reports from Redis. Owner only."""
+    if not REDIS_AVAILABLE:
+        raise HTTPException(status_code=503, detail="Redis not available")
     try:
-        reports = _list_reports(limit=limit)
-        return {"reports": reports, "source": "redis" if REDIS_AVAILABLE else "memory"}
+        r = redis.from_url(REDIS_URL)
+        keys = r.keys("rrs:admin:*")[:limit]
+        reports = []
+        for key in keys:
+            key_str = key.decode() if isinstance(key, bytes) else key
+            data = r.get(key_str)
+            if data:
+                reports.append({
+                    "id": key_str.replace("rrs:admin:", ""),
+                    "key": key_str,
+                    "size": len(data),
+                })
+        return {"reports": reports}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
@@ -408,19 +323,31 @@ async def list_admin_reports(limit: int = 20):
 @app.get("/api/v1/admin/report/{scan_id}", dependencies=[Depends(verify_admin)])
 async def get_admin_report(scan_id: str):
     """Get a specific admin report. Owner only."""
-    data, source = _get_report(scan_id)
-    if data is None:
-        raise HTTPException(status_code=404, detail="Report not found")
-    return data
+    if not REDIS_AVAILABLE:
+        raise HTTPException(status_code=503, detail="Redis not available")
+    try:
+        r = redis.from_url(REDIS_URL)
+        data = r.get(f"rrs:admin:{scan_id}")
+        if not data:
+            raise HTTPException(status_code=404, detail="Report not found")
+        return json.loads(data)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
 
 
 @app.get("/api/v1/admin/report/{scan_id}/forwardable", dependencies=[Depends(verify_admin)])
 async def get_forwardable_report(scan_id: str):
     """Get the forwardable markdown report. Owner only."""
-    data, source = _get_forwardable(scan_id)
-    if data is None:
-        raise HTTPException(status_code=404, detail="Report not found")
-    return {"markdown": data, "source": source}
+    if not REDIS_AVAILABLE:
+        raise HTTPException(status_code=503, detail="Redis not available")
+    try:
+        r = redis.from_url(REDIS_URL)
+        data = r.get(f"rrs:forwardable:{scan_id}")
+        if not data:
+            raise HTTPException(status_code=404, detail="Report not found")
+        return {"markdown": data.decode() if isinstance(data, bytes) else data}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
 
 
 # ── Main entry ──────────────────────────────────────────────────────────────

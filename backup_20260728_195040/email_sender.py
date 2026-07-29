@@ -312,6 +312,13 @@ li {{ margin: 4px 0; }}
         if value >= 20: return "poor"
         return "critical"
 
+    def _six_score_status(self, value: int) -> str:
+        if value >= 80: return "excellent"
+        if value >= 60: return "good"
+        if value >= 40: return "fair"
+        if value >= 20: return "poor"
+        return "critical"
+
     def _get_score_status(self, name: str, value: int) -> str:
         """Returns status label, handling badness scores (higher=worse) correctly."""
         badness = {"ai_copy_cliche", "revenue_leak"}
@@ -341,11 +348,8 @@ li {{ margin: 4px 0; }}
         <tr><th>Dimension</th><th>Score</th><th>Status</th></tr>
         """
         for name, val in scores.items():
-            # FIX: val may be a dict like {"score": 100, "label": "...", "status": "..."}
-            score_value = val.get("score", 0) if isinstance(val, dict) else int(val)
-            status = self._get_score_status(name, score_value)
-            label = val.get("label", name.replace("_", " ").title()) if isinstance(val, dict) else name.replace("_", " ").title()
-            html += f'<tr><td>{label}</td><td>{score_value}/100</td><td class="score-{status}">{status.title()}</td></tr>'
+            status = self._get_score_status(name, val)
+            html += f'<tr><td>{name.replace("_", " ").title()}</td><td>{val}/100</td><td class="score-{status}">{status.title()}</td></tr>'
         html += "</table>"
 
         leak = admin.get("revenue_leak_estimate", {})
