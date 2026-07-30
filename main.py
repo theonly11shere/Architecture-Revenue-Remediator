@@ -4,6 +4,7 @@ from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from app.services.scorer import LeakAnalyzer
 from app.services.pdf_reporter import PDFReporter
+from app.services.scraper import WebsiteScraper
 
 app = FastAPI(title="Audit Scanner API")
 
@@ -25,6 +26,7 @@ def home():
 def get_payment_options():
     return {
         "tiers": [
+            {"id": "entry", "name": "Entry Tier", "price": 0},
             {"id": "growth", "name": "Growth Tier", "price": 49},
             {"id": "scale", "name": "Scale Tier", "price": 99}
         ]
@@ -33,18 +35,25 @@ def get_payment_options():
 @app.post("/api/v1/scan")
 async def scan_website(data: dict):
     try:
-        target_features = data.get("target_features", {})
+        # Extract URL from frontend request
+        url = data.get("url") or data.get("target_url") or "karakoramrestaurant.com"
+        
+        # 1. Live scrape the website features using your scraper service
+        target_features = data.get("target_features")
+        if not target_features or len(target_features) == 0:
+            target_features = WebsiteScraper.scrape_url(url)
+
         competitor_features = data.get("competitor_features", {})
         business_type = data.get("business_type", "general")
         is_local = data.get("is_local", True)
         tier = data.get("tier", "growth")
         recipient_email = data.get("email")
 
-        # 1. Generate the audit scores and report payload for your UI
+        # 2. Run leak analysis and scoring
         analyzer = LeakAnalyzer(target_features, competitor_features, business_type, is_local)
         report_payload = analyzer.get_tier_report(tier)
 
-        # 2. Optionally generate PDF & send email via Resend in the background
+        # 3. Generate PDF & send email via Resend if email is provided
         if recipient_email:
             try:
                 output_filename = "client_audit_report.pdf"
@@ -69,7 +78,7 @@ async def scan_website(data: dict):
             except Exception as email_err:
                 print(f"Email/PDF background task error: {email_err}")
 
-        # 3. Return JSON so your frontend UI can populate those dials and scores!
+        # 4. Return JSON payload so frontend UI dials render correctly
         return report_payload
 
     except Exception as e:

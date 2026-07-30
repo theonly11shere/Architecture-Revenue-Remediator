@@ -48,7 +48,6 @@ class LeakAnalyzer:
         elif tier == "growth":
             selected_leaks = sorted_leaks[:6]
             
-            # Safe indexing helper to prevent IndexError if fewer than 6 leaks exist
             def get_leak(idx, default_title="General Optimization", default_expl="improving site conversion metrics"):
                 if idx < len(selected_leaks):
                     return selected_leaks[idx]
@@ -83,12 +82,12 @@ class LeakAnalyzer:
                 "Week 3-4 (Full Optimization & Secret Leaks)": [f"Optimize {l['issue']}" for l in selected_leaks[6:]]
             }
         
-        # Scaled to sit safely around your target baseline with empty-list protection[cite: 2]
+        # Controlled scaling to sit precisely around your 53 baseline target
         if selected_leaks:
             raw_template_score = sum(l["severity_score"] for l in selected_leaks)
-            template_score = min(max(int(raw_template_score * 0.35), 25), 58)
+            template_score = min(max(int(raw_template_score * 0.35), 20), 55)
         else:
-            template_score = 30
+            template_score = 53
 
         return {
             "tier_applied": tier,
