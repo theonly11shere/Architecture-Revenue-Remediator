@@ -30,4 +30,4 @@ RUN python -m playwright install --with-deps chromium
 
 COPY . .
 
-CMD ["python", "start.py"]
+CMD ["sh", "-c", "uvicorn api:app --host 0.0.0.0 --port ${PORT:-8000}"]
