@@ -1,134 +1,78 @@
-import asyncio
 import requests
-import logging
-from typing import Dict, Any, Optional
 from bs4 import BeautifulSoup
-
-# Import standalone tools from scorer
-from scorer import TemplateFingerprinter, ContentSamenessChecker, RevenueScorer
-
-logger = logging.getLogger(__name__)
-
+import re
+from typing import Dict, Any
 
 class WebsiteScraper:
-    def __init__(self, target_url: str, competitor_url: Optional[str] = None):
-        self.target_url = target_url
-        self.competitor_url = competitor_url
+    @staticmethod
+    def scrape_url(url: str) -> Dict[str, Any]:
+        """
+        Scrapes a target website and extracts structural, trust, 
+        and conversion features to evaluate against revenue leaks.
+        """
+        if not url.startswith("http://") and not url.startswith("https://"):
+            url = "https://" + url
 
-    # --- Synchronous Helper Methods (Executed in threadpool to prevent blocking) ---
-
-    def _check_sitemap(self) -> bool:
-        try:
-            url = f"{self.target_url.rstrip('/')}/sitemap.xml"
-            res = requests.head(url, timeout=5, allow_redirects=True)
-            return res.status_code == 200
-        except Exception:
-            return False
-
-    def _check_robots(self) -> bool:
-        try:
-            url = f"{self.target_url.rstrip('/')}/robots.txt"
-            res = requests.head(url, timeout=5, allow_redirects=True)
-            return res.status_code == 200
-        except Exception:
-            return False
-
-    def _check_broken_links(self) -> int:
-        try:
-            res = requests.get(self.target_url, timeout=5)
-            if res.status_code != 200:
-                return 1
-            soup = BeautifulSoup(res.text, "html.parser")
-            links = [a.get("href") for a in soup.find_all("a", href=True)][:10]  # Sample first 10
-            broken = 0
-            for link in links:
-                if link.startswith("http"):
-                    try:
-                        r = requests.head(link, timeout=3, allow_redirects=True)
-                        if r.status_code >= 400:
-                            broken += 1
-                    except Exception:
-                        broken += 1
-            return broken
-        except Exception:
-            return 0
-
-    def _run_checkpoint_checks(self) -> Dict[str, Any]:
-        """Runs synchronous network checks for checkpoints."""
-        return {
-            "has_sitemap": self._check_sitemap(),
-            "has_robots": self._check_robots(),
-            "broken_links_count": self._check_broken_links(),
+        features = {
+            "mobile_sticky_cta": False,
+            "exit_intent_capture": False,
+            "social_proof_above_fold": False,
+            "no_click_to_call": True,
+            "local_seo_schema": False,
+            "lcp_speed_lag": False,
+            "missing_ssl": not url.startswith("https://"),
+            "broken_meta": True,
+            "no_secondary_cta": True,
+            "competitor_feature_gap": False
         }
 
-    def _calculate_revenue_leak_inputs(self, checkpoint_results: Dict[str, Any]) -> Dict[str, Any]:
-        """
-        Computes revenue leak inputs using pre-computed checkpoint results 
-        without re-running network requests.
-        """
-        broken_links = checkpoint_results.get("broken_links_count", 0)
-        friction = min(1.0, broken_links * 0.2)
-        
-        has_sitemap = checkpoint_results.get("has_sitemap", False)
-        trust_gap = 0.0 if has_sitemap else 0.3
-
-        return {
-            "differentiation_gap": 0.2,  # Baseline or calculated value
-            "conversion_friction": friction,
-            "trust_gap": trust_gap,
-        }
-
-    # --- Main Async Pipeline ---
-
-    async def _scrape_async(self) -> Dict[str, Any]:
-        """Main async entry point for scanning and scoring."""
-        loop = asyncio.get_running_loop()
-
-        # 1. Fetch page content off the main async thread
         try:
-            response = await loop.run_in_executor(
-                None, lambda: requests.get(self.target_url, timeout=10)
-            )
-            html_content = response.text if response.status_code == 200 else ""
+            headers = {
+                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+            }
+            response = requests.get(url, headers=headers, timeout=10)
+            html_content = response.text
+            soup = BeautifulSoup(html_content, 'html.parser')
+
+            # 1. Check for Click-to-Call (tel: links)
+            tel_links = soup.find_all('a', href=re.compile(r'^tel:'))
+            if tel_links:
+                features["no_click_to_call"] = False
+
+            # 2. Check for Local Business / Organization JSON-LD Schema
+            json_ld_tags = soup.find_all('script', type='application/ld+json')
+            for tag in json_ld_tags:
+                text_content = tag.string or ""
+                if any(schema_type in text_content for schema_type in ["LocalBusiness", "Organization", "Restaurant", "Store", "Service"]):
+                    features["local_seo_schema"] = True
+                    break
+
+            # 3. Check for Above-the-Fold Social Proof
+            body_text = soup.get_text().lower()
+            social_proof_keywords = ["review", "testimonial", "stars", "rated", "trusted by", "clients", "customer"]
+            if any(kw in body_text[:2500] for kw in social_proof_keywords):
+                features["social_proof_above_fold"] = True
+
+            # 4. Check for OpenGraph Meta Tags
+            og_title = soup.find('meta', property='og:title')
+            og_image = soup.find('meta', property='og:image')
+            if og_title and og_image:
+                features["broken_meta"] = False
+
+            # 5. Check for Secondary Call-to-Action
+            buttons = soup.find_all(['button', 'a'], class_=re.compile(r'btn|button|cta|action|order|book', re.I))
+            if len(buttons) > 1:
+                features["no_secondary_cta"] = False
+
+            # 6. Heuristic check for Exit-Intent or Mobile Sticky CTA
+            script_text = "".join([s.get_text() for s in soup.find_all('script')])
+            if any(term in script_text.lower() for term in ["exit", "ouibounce", "popup", "modal", "lead-capture"]):
+                features["exit_intent_capture"] = True
+
+            if any(term in html_content.lower() for term in ["sticky", "fixed-bottom", "floating-cta"]):
+                features["mobile_sticky_cta"] = True
+
         except Exception as e:
-            logger.error(f"Failed to fetch target URL: {e}")
-            html_content = ""
+            print(f"Error scraping target URL {url}: {e}")
 
-        # 2. Run synchronous network checks in thread pool ONCE
-        checkpoint_results = await loop.run_in_executor(
-            None, self._run_checkpoint_checks
-        )
-
-        # 3. Calculate revenue leak inputs passing pre-computed checkpoint results
-        revenue_leak_inputs = self._calculate_revenue_leak_inputs(checkpoint_results)
-
-        # 4. Generate visual/template fingerprinting using imported tools
-        fingerprint = TemplateFingerprinter.compute_fingerprint(html_content)
-
-        # 5. Visual twin mapping (ensures both keys exist for backwards compatibility)
-        visual_data = {
-            "fingerprint": fingerprint,
-            "similarity_percent": 15,  # Calculated comparison ratio against competitors
-        }
-
-        # 6. Construct complete data payload
-        data = {
-            "target_url": self.target_url,
-            "checkpoints": checkpoint_results,
-            "revenue_leak_inputs": revenue_leak_inputs,
-            "visual_twin": visual_data,          # Primary key for RevenueScorer
-            "visual_fingerprint": visual_data,   # Secondary key fallback
-            "ai_copy_analysis": {
-                "combined_score": 12  # Example % duplicate/AI match
-            },
-        }
-
-        # 7. Instantiate scorer and compute final audit metrics
-        scorer = RevenueScorer(data)
-        data["scores"] = scorer.calculate_all_scores()
-
-        return data
-
-    def run(() -> Dict[str, Any]:
-        """Synchronous wrapper to trigger async scrape."""
-        return asyncio.run(self._scrape_async())
+        return features
