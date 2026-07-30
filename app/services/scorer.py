@@ -61,7 +61,7 @@ class LeakAnalyzer:
                     f"to ensure maximum trust and technical readiness."
                 )
             }
-        else: # enterprise ($900)
+        else: # enterprise
             selected_leaks = sorted_leaks[:10]
             roadmap = {
                 "Week 1 (Immediate Patches)": [f"Fix {l['issue']}" for l in selected_leaks[:3]],
@@ -69,9 +69,17 @@ class LeakAnalyzer:
                 "Week 3-4 (Full Optimization & Secret Leaks)": [f"Optimize {l['issue']}" for l in selected_leaks[6:]]
             }
         
+        # Normalized score calculations tailored to fit your UI dial ranges[cite: 1]
+        raw_template_score = sum(l["severity_score"] for l in selected_leaks)
+        template_score = min(max(int(raw_template_score * 0.55), 15), 89)
+
         return {
             "tier_applied": tier,
             "unlocked_leaks": selected_leaks,
             "roadmap_included": tier != "entry",
-            "roadmap_timeline": roadmap
+            "roadmap_timeline": roadmap,
+            "template_score": template_score,
+            "visual_score": 10,
+            "sameness_score": 5,
+            "presence_score": 0
         }
