@@ -1,14 +1,12 @@
 import os
 import resend
 from fastapi import FastAPI, HTTPException
-from fastapi.responses import FileResponse
 from fastapi.middleware.cors import CORSMiddleware
 from app.services.scorer import LeakAnalyzer
 from app.services.pdf_reporter import PDFReporter
 
 app = FastAPI(title="Audit Scanner API")
 
-# Enable CORS so your frontend can talk to the backend smoothly
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -25,7 +23,6 @@ def home():
 
 @app.get("/api/v1/payment-options")
 def get_payment_options():
-    # Return your payment tiers/options if your frontend looks for this
     return {
         "tiers": [
             {"id": "growth", "name": "Growth Tier", "price": 49},
@@ -43,33 +40,37 @@ async def scan_website(data: dict):
         tier = data.get("tier", "growth")
         recipient_email = data.get("email")
 
-        # 1. Generate the audit report payload and PDF
+        # 1. Generate the audit scores and report payload for your UI
         analyzer = LeakAnalyzer(target_features, competitor_features, business_type, is_local)
         report_payload = analyzer.get_tier_report(tier)
 
-        output_filename = "client_audit_report.pdf"
-        pdf_path = await PDFReporter.generate_pdf(report_payload, output_filename)
-
-        # 2. Send email via Resend if email is provided
+        # 2. Optionally generate PDF & send email via Resend in the background
         if recipient_email:
-            with open(pdf_path, "rb") as f:
-                pdf_bytes = f.read()
+            try:
+                output_filename = "client_audit_report.pdf"
+                pdf_path = await PDFReporter.generate_pdf(report_payload, output_filename)
+                
+                with open(pdf_path, "rb") as f:
+                    pdf_bytes = f.read()
 
-            params = {
-                "from": "onboarding@resend.dev", # Change to your verified domain email later if needed
-                "to": [recipient_email],
-                "subject": "Your Website Performance & Leak Audit",
-                "html": "<p>Hi there! Attached is your comprehensive website audit report.</p>",
-                "attachments": [
-                    {
-                        "filename": "audit_report.pdf",
-                        "content": list(pdf_bytes)
-                    }
-                ]
-            }
-            resend.Emails.send(params)
+                params = {
+                    "from": "onboarding@resend.dev",
+                    "to": [recipient_email],
+                    "subject": "Your Website Performance & Leak Audit",
+                    "html": "<p>Hi there! Attached is your comprehensive website audit report.</p>",
+                    "attachments": [
+                        {
+                            "filename": "audit_report.pdf",
+                            "content": list(pdf_bytes)
+                        }
+                    ]
+                }
+                resend.Emails.send(params)
+            except Exception as email_err:
+                print(f"Email/PDF background task error: {email_err}")
 
-        return FileResponse(pdf_path, media_type="application/pdf", filename="audit_report.pdf")
+        # 3. Return JSON so your frontend UI can populate those dials and scores!
+        return report_payload
 
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
