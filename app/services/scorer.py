@@ -47,17 +47,31 @@ class LeakAnalyzer:
             roadmap = None
         elif tier == "growth":
             selected_leaks = sorted_leaks[:6]
+            
+            # Safe indexing helper to prevent IndexError if fewer than 6 leaks exist
+            def get_leak(idx, default_title="General Optimization", default_expl="improving site conversion metrics"):
+                if idx < len(selected_leaks):
+                    return selected_leaks[idx]
+                return {"issue": default_title, "explanation": default_expl}
+
+            l0 = get_leak(0)
+            l1 = get_leak(1)
+            l2 = get_leak(2)
+            l3 = get_leak(3)
+            l4 = get_leak(4)
+            l5 = get_leak(5)
+
             roadmap = {
                 "Days 1-2: Trust & Mobile Foundation": (
-                    f"Begin by resolving {selected_leaks[0]['issue'].lower()} ({selected_leaks[0]['explanation'].lower()}) "
-                    f"alongside {selected_leaks[1]['issue'].lower()} to instantly secure mobile traffic and local visibility."
+                    f"Begin by resolving {l0['issue'].lower()} ({l0['explanation'].lower()}) "
+                    f"alongside {l1['issue'].lower()} to instantly secure mobile traffic and local visibility."
                 ),
                 "Days 3-5: Conversion & Lead Capture": (
-                    f"Focus on implementing {selected_leaks[2]['issue'].lower()} and {selected_leaks[3]['issue'].lower()} "
+                    f"Focus on implementing {l2['issue'].lower()} and {l3['issue'].lower()} "
                     f"to actively convert high-intent visitors before they abandon the page."
                 ),
                 "Days 6-7: Performance & Security Polish": (
-                    f"Finalize the sprint by addressing {selected_leaks[4]['issue'].lower()} and {selected_leaks[5]['issue'].lower()} "
+                    f"Finalize the sprint by addressing {l4['issue'].lower()} and {l5['issue'].lower()} "
                     f"to ensure maximum trust and technical readiness."
                 )
             }
@@ -69,9 +83,12 @@ class LeakAnalyzer:
                 "Week 3-4 (Full Optimization & Secret Leaks)": [f"Optimize {l['issue']}" for l in selected_leaks[6:]]
             }
         
-        # Normalized score calculations tailored to fit your UI dial ranges[cite: 1]
-        raw_template_score = sum(l["severity_score"] for l in selected_leaks)
-        template_score = min(max(int(raw_template_score * 0.55), 15), 89)
+        # Scaled to sit safely around your target baseline with empty-list protection[cite: 2]
+        if selected_leaks:
+            raw_template_score = sum(l["severity_score"] for l in selected_leaks)
+            template_score = min(max(int(raw_template_score * 0.35), 25), 58)
+        else:
+            template_score = 30
 
         return {
             "tier_applied": tier,
