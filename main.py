@@ -46,8 +46,8 @@ async def run_audit(payload: AuditRequest):
         b_type = payload.business_type.strip()
 
         # 1. Execute Scraper & Scorer
-        scraped_data = scrape_website(url) if 'scrape_website' in globals() else {}
-        score_results = score_audit(scraped_data, b_type) if 'score_audit' in globals() else {}
+        scraped_data = scrape_website(url) 
+        score_results = score_audit(scraped_data, b_type) 
 
         clean_domain = url.replace("https://", "").replace("http://", "").split("/")[0]
 
