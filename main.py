@@ -1,4 +1,6 @@
 import os
+from scraper import scrape_website
+from scorer import score_audit
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
