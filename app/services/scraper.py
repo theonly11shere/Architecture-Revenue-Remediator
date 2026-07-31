@@ -4,7 +4,7 @@ Performs physical DOM inspections, link checks, and status evaluations for the t
 """
 
 from playwright.sync_api import sync_playwright
-from config import CHECKPOINTS
+from app.core.config import CHECKPOINTS
 
 class SiteScraper:
     def __init__(self, headless: bool = True):
