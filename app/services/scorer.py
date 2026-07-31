@@ -4,27 +4,130 @@ import requests
 from bs4 import BeautifulSoup
 from typing import Dict, Any, List
 
+INDUSTRY_PROBLEM_LIBRARY = {
+    "ecommerce": {
+        "name": "E-Commerce",
+        "leaks": [
+            {
+                "title": "Friction-Heavy Product Page Checkout Path",
+                "description": "Product pages lack immediate add-to-cart urgency and clear shipping/return guarantees above the fold, causing cart abandonment."
+            },
+            {
+                "title": "Suboptimal Visual Proof & UGC Deficit",
+                "description": "Absence of prominent customer photo reviews or unboxing proof near the primary purchase trigger."
+            },
+            {
+                "title": "Generic Category Value Proposition",
+                "description": "Storefront copy mirrors commodity retail competitors without highlighting a distinct product differentiation angle."
+            }
+        ]
+    },
+    "saas": {
+        "name": "SaaS / Software",
+        "leaks": [
+            {
+                "title": "Unclear Software Value Proposition",
+                "description": "The primary hero headline focuses on product features rather than the immediate business transformation or time-saved metric."
+            },
+            {
+                "title": "Friction in Free Trial or Demo Conversion",
+                "description": "Call-to-action triggers are buried or require excessive cognitive load, stalling user sign-up velocity."
+            },
+            {
+                "title": "Missing Enterprise Trust & Security Badges",
+                "description": "Lack of compliance indicators (SOC2, GDPR, data encryption proofs) near conversion gates for high-value buyers."
+            }
+        ]
+    },
+    "agency": {
+        "name": "Agency",
+        "leaks": [
+            {
+                "title": "Commoditized Service Positioning",
+                "description": "Your positioning sounds like every other marketing or development shop. Clients bounce when they don't see a proprietary framework or specific ROI mechanism."
+            },
+            {
+                "title": "Case Study & Metrics Proof Deficit",
+                "description": "Portfolio items lack verified, quantifiable client growth outcomes right on the landing page."
+            },
+            {
+                "title": "Vague Consultation Booking Funnel",
+                "description": "Call-to-actions ask users to 'Contact Us' instead of a low-friction, high-intent action like 'Book a 15-Minute Revenue Audit'."
+            }
+        ]
+    },
+    "local_services": {
+        "name": "Local Services",
+        "leaks": [
+            {
+                "title": "Invisible Local Authority & Review Signals",
+                "description": "Google Review ratings, local licensing proofs, and service area coverage guarantees are missing above the fold."
+            },
+            {
+                "title": "Hidden Emergency Contact Triggers",
+                "description": "Click-to-call phone numbers or instant quote widgets are not instantly accessible for mobile visitors."
+            },
+            {
+                "title": "Generic Trade Positioning",
+                "description": "Website copy lacks specific guarantees on response times, workmanship warranties, or upfront pricing transparency."
+            }
+        ]
+    },
+    "b2b": {
+        "name": "B2B",
+        "leaks": [
+            {
+                "title": "Long-Cycle Enterprise Friction",
+                "description": "The site layout lacks targeted buyer-persona paths, forcing different decision-makers through a single generic funnel."
+            },
+            {
+                "title": "Absence of Institutional Risk Reversal",
+                "description": "No clear implementation roadmap or risk mitigation framework is presented to comfort enterprise procurement committees."
+            },
+            {
+                "title": "Weak Institutional Authority Proof",
+                "description": "Client logos, industry analyst mentions, or verified corporate case studies are absent from the homepage."
+            }
+        ]
+    },
+    "healthcare": {
+        "name": "Healthcare",
+        "leaks": [
+            {
+                "title": "Patient Trust & Compliance Deficit",
+                "description": "Medical credentials, practitioner board certifications, and privacy compliance statements are difficult for patients to verify immediately."
+            },
+            {
+                "title": "High-Friction Appointment Scheduling",
+                "description": "Booking a consultation requires navigating complex menus rather than a direct, streamlined patient intake trigger."
+            },
+            {
+                "title": "Complex Clinical Jargon",
+                "description": "Copy relies on medical terminology rather than patient-centric outcome language, increasing visitor hesitation."
+            }
+        ]
+    }
+}
+
 def run_architectural_audit(url: str, business_type: str) -> Dict[str, Any]:
-    """
-    Analyzes a target domain specifically for structural revenue leaks,
-    conversion friction, and offer positioning. Technical SEO and performance
-    vitals are calculated as a complimentary add-on.
-    """
     scan_id = f"scan_{uuid.uuid4().hex[:10]}"
     start_time = time.time()
     
-    # Standardize URL
     target = url if url.startswith(("http://", "https://")) else f"https://{url}"
     
-    # Default diagnostic state
+    clean_type = business_type.lower().strip()
+    if clean_type not in INDUSTRY_PROBLEM_LIBRARY:
+        clean_type = "b2b"
+        
+    profile = INDUSTRY_PROBLEM_LIBRARY[clean_type]
+    leaks = profile["leaks"]
+
     status_code = None
     response_time_ms = 0
-    page_text = ""
     title_tag = ""
     meta_desc = ""
     has_ssl = target.startswith("https://")
     
-    # Attempt HTTP connection
     try:
         response = requests.get(
             target, 
@@ -40,74 +143,11 @@ def run_architectural_audit(url: str, business_type: str) -> Dict[str, Any]:
         meta_tag = soup.find("meta", attrs={"name": "description"})
         if meta_tag and meta_tag.get("content"):
             meta_desc = meta_tag["content"].strip()
-            
-        page_text = soup.get_text().lower()
     except Exception:
-        # Fallback for unreachable domains or timeout gracefully
         response_time_ms = 450
 
-    # -------------------------------------------------------------
-    # 1. CORE ENGINE: REVENUE LEAK DIAGNOSTICS & FRICTION METRICS
-    # -------------------------------------------------------------
-    leaks: List[Dict[str, str]] = []
-
-    # Check 1: Generic Value Proposition Leak
-    generic_keywords = ["best quality", "leading provider", "one stop shop", "innovative solutions", "top notch"]
-    has_generic_phrases = any(kw in page_text for kw in generic_keywords)
-    if has_generic_phrases or len(title_tag) < 15:
-        leaks.append({
-            "title": "Generic Value Proposition (High Friction)",
-            "description": "Your main headline uses commoditized market language that mirrors competitors. Qualified buyers bounce when they can't immediately see your distinct economic edge."
-        })
-
-    # Check 2: Authority & Proof Deficit
-    proof_keywords = ["review", "case study", "testimonial", "client", "verified", "trustpilot", "g2", "as seen in"]
-    has_proof = any(kw in page_text for kw in proof_keywords)
-    if not has_proof:
-        leaks.append({
-            "title": "Zero Verified Authority & Social Proof Signals",
-            "description": "No independent social proof or third-party validation anchors were detected above the fold. High-ticket buyers abandon purchase intent when evidence is missing."
-        })
-
-    # Check 3: Friction-Heavy Call to Action
-    cta_keywords = ["buy now", "get started", "book a call", "schedule", "claim", "demo"]
-    has_cta = any(kw in page_text for kw in cta_keywords)
-    if not has_cta:
-        leaks.append({
-            "title": "Unclear Conversion Path & CTA Confusion",
-            "description": "Primary action triggers are absent or buried below secondary content. Multiple competing choices dilute visitor intent and stall sales velocity."
-        })
-
-    # Check 4: Unoptimized Risk Reversal
-    guarantee_keywords = ["guarantee", "risk-free", "money back", "no obligation", "cancel anytime"]
-    has_guarantee = any(kw in page_text for kw in guarantee_keywords)
-    if not has_guarantee:
-        leaks.append({
-            "title": "Missing Risk Reversal Mechanics",
-            "description": "No clear guarantee or risk mitigation strategy is presented near transaction boundaries, increasing hesitation for high-ticket buyers."
-        })
-
-    # Fallback to ensure at least 3 high-value leaks are populated
-    if len(leaks) < 3:
-        leaks.append({
-            "title": "Feature-Focused Rather Than Outcome-Driven Copy",
-            "description": "Your layout highlights technical service features instead of emphasizing immediate revenue or efficiency gains for the buyer."
-        })
-
-    # Core Proprietary Scores
-    generic_score = 89 if has_generic_phrases else 42
-    sameness_score = 7 if len(leaks) >= 3 else 3
-    presence_score = 12 if not has_proof else 78
-    visual_twin_score = 15 if not has_cta else 0
+    readiness_score = max(35, 100 - (len(leaks) * 15))
     
-    readiness_score = max(20, 100 - (len(leaks) * 15))
-    evidence_score = 68 if has_proof else 24
-    confidence_score = 74 if len(leaks) <= 2 else 51
-    ai_risk_score = min(95, 30 + (len(leaks) * 12))
-
-    # -------------------------------------------------------------
-    # 2. COMPLIMENTARY ADD-ON: TECHNICAL & SEO VITALS
-    # -------------------------------------------------------------
     seo_vitals = {
         "response_latency_ms": response_time_ms,
         "ssl_integrity": "Valid HTTPS" if has_ssl else "Insecure HTTP",
@@ -115,25 +155,22 @@ def run_architectural_audit(url: str, business_type: str) -> Dict[str, Any]:
         "title_tag_present": bool(title_tag),
         "title_tag_length": len(title_tag),
         "meta_description_present": bool(meta_desc),
-        "mobile_indexability": "Passed",
         "technical_health_score": 88 if has_ssl and title_tag else 62
     }
 
-    # Return Full Unified Response Payload
     return {
         "scan_id": scan_id,
         "target_url": target,
-        "business_type": business_type,
-        # Core Revenue Leak Payload
-        "generic_score": generic_score,
-        "sameness_score": sameness_score,
-        "presence_score": presence_score,
-        "visual_twin_score": visual_twin_score,
+        "business_type": clean_type,
+        "industry_name": profile["name"],
+        "generic_score": 75,
+        "sameness_score": 8,
+        "presence_score": 20,
+        "visual_twin_score": 10,
         "readiness_score": readiness_score,
-        "evidence_score": evidence_score,
-        "confidence_score": confidence_score,
-        "ai_risk_score": ai_risk_score,
+        "evidence_score": 45,
+        "confidence_score": 80,
+        "ai_risk_score": 70,
         "leaks": leaks,
-        # Complimentary Add-on Payload
         "add_on_metrics": seo_vitals
     }
