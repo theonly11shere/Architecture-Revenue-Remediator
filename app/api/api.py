@@ -1,5 +1,9 @@
-#!/usr/bin/env python3
-"""RRS API — FastAPI app with competitor support, admin reports, and email delivery."""
+"""
+Trilloka Revenue Readiness & Audit API
+FastAPI backend handling Pass ID authentication, tier limits, URL normalization,
+Architect guardrails, automated scoring, and email report delivery.
+"""
+
 import os
 import json
 import asyncio
@@ -7,12 +11,20 @@ import time
 from typing import Optional, List
 from datetime import datetime
 
-from fastapi import FastAPI, HTTPException, BackgroundTasks, Request, Depends, Header
+from fastapi import FastAPI, HTTPException, BackgroundTasks, Request, Depends
 from fastapi.responses import JSONResponse
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from bs4 import BeautifulSoup
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
+
+# ── Trilloka Services & Core Imports ───────────────────────────────────────
+from app.services.tier_manager import TierManager, normalize_url
+from app.services.email_sender import send_audit_email
+from app.services.scraper import SiteScraper
+from app.services.scorer import ExternalScorer
+from app.core.blueprints import SolutionBlueprintEngine
+from app.services.report_generator import ReportGenerator
 
 # ── Security: API Key for admin endpoints ──────────────────────────────────
 ADMIN_API_KEY = os.environ.get("ADMIN_API_KEY", "")
@@ -42,55 +54,31 @@ async def rate_limit(request: Request, max_requests: int = 10):
     client_ip = request.client.host if request.client else "unknown"
     now = time.time()
     window = _rate_limit_store.get(client_ip, [])
-    # Filter to current window
     window = [t for t in window if now - t < RATE_LIMIT_WINDOW]
     if len(window) >= max_requests:
         raise HTTPException(status_code=429, detail="Rate limit exceeded. Try again in a minute.")
     window.append(now)
     _rate_limit_store[client_ip] = window
 
-# IP Geolocation for auto-detecting location
-try:
-    from ip_geolocation import get_location_from_ip, get_client_ip
-    IP_GEO_AVAILABLE = True
-except ImportError:
-    IP_GEO_AVAILABLE = False
+# ── Guardrail: Intercept Self-Scans of The Architect / Master Domain ────────
+RESTRICTED_DOMAINS = ["trilloka.com", "thearchitect.io", "localhost", "127.0.0.1"]
 
-# RRS modules
-from config import (
-    PRICING, ADMIN_EMAIL, ADMIN_REPORT_AUTO_SEND, EMAIL_FROM, RESEND_API_KEY as _CONFIG_RESEND_KEY,
-    ADMIN_REPORT_INCLUDE_ROADMAP, ADMIN_REPORT_INCLUDE_COMPETITOR,
-    REDIS_URL, RATE_LIMIT_FREE, RATE_LIMIT_PAID,
-)
+def check_architect_guardrail(target_url: str):
+    clean_url = target_url.lower().replace("https://", "").replace("http://", "").split("/")[0]
+    if any(domain in clean_url for domain in RESTRICTED_DOMAINS):
+        raise HTTPException(
+            status_code=403,
+            detail=(
+                "🛑 SECURITY EXCEPTION: EGO OVERFLOW DETECTED. "
+                "Nice try attempting to audit perfection. We scanned your URL, "
+                "found an absolute masterclass of engineering, and decided to spare "
+                "you the existential crisis. Go fix your client's conversion funnel instead."
+            )
+        )
 
-# Fallback: read Resend key directly from env
-RESEND_API_KEY = os.environ.get("RESEND_API_KEY", _CONFIG_RESEND_KEY or "")
-from scraper import WebsiteScraper
-from scorer import RevenueScorer
-from content_evidence_signals import ContentEvidenceSignals
-from reporter import ReportGenerator
+app = FastAPI(title="Trilloka Revenue Leak & Audit Scanner", version="5.0.0")
 
-# Optional: Resend for email
-try:
-    import resend
-    RESEND_AVAILABLE = True
-except ImportError:
-    RESEND_AVAILABLE = False
-
-# Optional: Redis for storing admin reports
-try:
-    import redis
-    REDIS_AVAILABLE = True
-except ImportError:
-    REDIS_AVAILABLE = False
-
-# Fallback memory stores if Redis is unavailable
-_in_memory_reports = {}
-_in_memory_forwardable = {}
-
-app = FastAPI(title="Revenue Readiness Scanner", version="4.1.0")
-
-# CORS — allow requests from your website ONLY in production
+# CORS Configuration
 _origins = [
     "https://trilloka.com",
     "https://www.trilloka.com",
@@ -119,291 +107,115 @@ async def options_handler(path: str):
 # ── Request Models ──────────────────────────────────────────────────────────
 
 class ScanRequest(BaseModel):
-    url: str  # Relaxed to str to allow auto-fixing missing http:// or https://
-    tier: str = "free"  # free | paid | roadmap | admin
-    competitor_urls: Optional[List[str]] = None
-    location: Optional[str] = ""
-    traffic: Optional[int] = None
-    conversion_rate: Optional[float] = None
-    aov: Optional[float] = None
+    url: str
+    pass_id: Optional[str] = None  # If provided, authenticates against TierManager CSV
+    email: Optional[str] = None    # Recipient for instant report delivery
+    business_type: str = "local"   # local, ecommerce, saas, agency, b2b, creator
+    competitor_url: Optional[str] = "Not Provided"
+    location: Optional[str] = "Global"
 
 
 class HealthResponse(BaseModel):
     status: str
     version: str
-    redis: bool
 
 
 # ── Endpoints ───────────────────────────────────────────────────────────────
 
 @app.get("/api/health", response_model=HealthResponse)
 async def health():
-    redis_ok = False
-    if REDIS_AVAILABLE:
-        try:
-            r = redis.from_url(REDIS_URL)
-            redis_ok = r.ping()
-        except Exception:
-            pass
-    return {"status": "ok", "version": "4.1.0", "redis": redis_ok}
-
-
-@app.get("/api/v1/payment-options")
-async def payment_options():
-    """Return available pricing tiers."""
-    return {
-        "tiers": [
-            {"id": "free", "name": "Free Scan", "price": 0, "features": ["6 revenue scores", "Top 5 issues", "Basic scan info"]},
-            {"id": "paid", "name": "Full Report", "price": PRICING.get("paid", 29), "features": ["Everything in Free", "Fix steps", "Competitor analysis", "Revenue leak estimate"]},
-            {"id": "roadmap", "name": "Roadmap", "price": PRICING.get("roadmap", 79), "features": ["Everything in Paid", "4-week action plan", "Week-by-week priorities"]},
-        ]
-    }
+    return {"status": "ok", "version": "5.0.0"}
 
 
 @app.post("/api/v1/scan")
 async def scan(request: ScanRequest, background_tasks: BackgroundTasks, http_request: Request):
-    # ── Auto-fix main URL protocol ──────────────────────────────────────────
-    raw_url = str(request.url).strip()
-    if not raw_url.startswith(("http://", "https://")):
-        raw_url = f"https://{raw_url}"
-    url = raw_url.rstrip("/")
+    """
+    Main Scan Endpoint:
+    - Normalizes URLs
+    - Triggers Architect Guardrail
+    - Validates Pass ID & Tier limits (or defaults to Free preview tier 3)
+    - Executes headless scraper & external scorer
+    - Generates solution blueprint report
+    - Automatically emails report to client in background
+    """
+    # 1. Normalize and check guardrail
+    target_url = normalize_url(request.url)
+    if not target_url:
+        raise HTTPException(status_code=400, detail="Invalid target URL provided.")
+    
+    check_architect_guardrail(target_url)
+    await rate_limit(http_request, max_requests=10)
 
-    tier = request.tier.lower()
+    # 2. Authenticate Pass ID or assign Free tier preview
+    client_tier = 3  # Default preview tier for free scans
+    if request.pass_id:
+        manager = TierManager()
+        authorized, client_tier, auth_message = manager.authorize_scan(request.pass_id, target_url)
+        if not authorized:
+            raise HTTPException(status_code=403, detail=f"Pass Authorization Failed: {auth_message}")
+    
+    # 3. Execute Scraper
+    scraper = SiteScraper(headless=True)
+    raw_results = scraper.scrape_url(target_url)
 
-    # ── Auto-fix competitor URLs protocol ────────────────────────────────────
-    competitor_urls = []
-    if request.competitor_urls:
-        for comp in request.competitor_urls:
-            comp_str = str(comp).strip()
-            if comp_str:
-                if not comp_str.startswith(("http://", "https://")):
-                    comp_str = f"https://{comp_str}"
-                competitor_urls.append(comp_str.rstrip("/"))
+    # 4. Score External Metrics
+    scorer = ExternalScorer()
+    final_checkpoint_results = scorer.enhance_checkpoint_results(raw_results, target_url)
 
-    location = request.location or ""
-
-    # ── Rate limiting ─────────────────────────────────────────────────────
-    raw_limit = RATE_LIMIT_PAID if tier in ("paid", "roadmap", "admin") else RATE_LIMIT_FREE
-    try:
-        limit_str = str(raw_limit).split('/')[0] if raw_limit else "10"
-        limit = int(limit_str)
-    except (ValueError, TypeError):
-        limit = 10
-    await rate_limit(http_request, max_requests=limit)
-
-    # ── Auto-detect location from IP if not provided ──────────────────────
-    if not location and IP_GEO_AVAILABLE:
-        client_ip = get_client_ip(dict(http_request.headers))
-        if client_ip and not client_ip.startswith(("127.", "10.", "192.168.", "172.")):
-            detected = get_location_from_ip(client_ip)
-            if detected:
-                location = detected
-                print(f"[Auto-Location] IP {client_ip} -> {location}")
-        elif not client_ip:
-            detected = get_location_from_ip("")
-            if detected:
-                location = detected
-                print(f"[Auto-Location] Connection IP -> {location}")
-
-    # Validate tier
-    if tier not in ["free", "paid", "roadmap", "admin"]:
-        raise HTTPException(status_code=400, detail="Invalid tier. Use: free, paid, roadmap, admin")
-
-    # 1. Scrape (Force "admin" tier so full competitor & deep data is fetched for email reports)
-    scraper = WebsiteScraper(
-        url=url,
-        tier="admin",
-        competitor_urls=competitor_urls,
-        location=location,
-    )
-    data = await scraper._scrape_async()
-
-    if "error" in data:
-        raise HTTPException(status_code=500, detail=f"Scrape failed: {data['error']}")
-
-    # 2. Score
-    revenue_scorer = RevenueScorer(data)
-    revenue_scorer.calculate_scores()
-
-    # 3. Content evidence
-    content_evidence = ContentEvidenceSignals(BeautifulSoup(data['raw_html'], 'html.parser'), data['url'])
-
-    # 4. Top failures
-    top_failures = revenue_scorer.get_top_failures(10)
-
-    # 5. Calculator inputs (if provided)
-    calc_inputs = {}
-    if request.traffic:
-        calc_inputs["traffic"] = request.traffic
-    if request.conversion_rate:
-        calc_inputs["conversion_rate"] = request.conversion_rate
-    if request.aov:
-        calc_inputs["aov"] = request.aov
-
-    # 6. Reporter
-    reporter = ReportGenerator(
-        url,
-        revenue_scorer,
-        content_evidence,
-        data,
-        top_failures,
-        calculator_inputs=calc_inputs if calc_inputs else None,
+    # 5. Dynamic Matrix Blueprint Calculation
+    engine = SolutionBlueprintEngine()
+    report_payload = engine.process_and_generate_report(
+        checkpoint_results=final_checkpoint_results,
+        client_tier=client_tier,
+        business_type=request.business_type
     )
 
-    # 7. Generate public report (what the visitor sees on website)
-    if tier == "free":
-        public_report = reporter.generate_free()
-    elif tier == "paid":
-        public_report = reporter.generate_paid()
-    elif tier == "roadmap":
-        public_report = reporter.generate_roadmap()
-    else:  # admin
-        public_report = reporter.generate_admin()
+    if report_payload.get("status") != "CALCULATIONS_COMPLETE":
+        raise HTTPException(status_code=500, detail=report_payload.get("message", "Calculation error."))
 
-    # 8. ALWAYS generate admin report + forwardable markdown (in background for your email)
-    background_tasks.add_task(
-        _process_admin_report,
-        url=url,
-        domain=data.get("domain", ""),
-        reporter=reporter,
-        data=data,
+    # 6. Generate Master Markdown Report
+    generator = ReportGenerator(
+        target_url=target_url,
+        competitor_url=request.competitor_url or "Not Provided",
+        location=request.location or "Global"
     )
+    markdown_output = generator.build_markdown_report(report_payload)
 
-    return JSONResponse(public_report)
+    # Append free upsell banner if scanning without an elite pass
+    if not request.pass_id:
+        markdown_output += "\n\n---\n"
+        markdown_output += "### 💎 Want Access to the Elite Architect Class?\n"
+        markdown_output += "You are currently viewing a complimentary public preview. To unlock full competitor gap matrices, deep audits, and direct team implementation, acquire a client pass at Trilloka."
 
+    # Save local report copy
+    filename_slug = target_url.replace('https://','').replace('http://','').replace('/','_')
+    output_filename = f"audit_report_{filename_slug}.md"
+    with open(output_filename, "w", encoding="utf-8") as f:
+        f.write(markdown_output)
 
-# ── Admin Report Background Task ────────────────────────────────────────────
+    # 7. Background task: Dispatch Email Report
+    if request.email:
+        background_tasks.add_task(
+            send_audit_email,
+            recipient_email=request.email,
+            target_url=target_url,
+            report_filepath=output_filename,
+            markdown_content=markdown_output
+        )
 
-async def _process_admin_report(url: str, domain: str, reporter: ReportGenerator, data: dict):
-    """Generates admin report, saves to Redis (or memory), emails pretty HTML to admin via Resend."""
-    try:
-        # Generate admin report
-        admin_report = reporter.generate_admin()
-        forwardable_md = reporter.generate_forwardable_report()
-        scan_id = f"{datetime.utcnow().isoformat().replace(':', '-')}-{domain}"
-
-        # Save to Redis or In-Memory
-        if REDIS_AVAILABLE:
-            try:
-                r = redis.from_url(REDIS_URL)
-                r.setex(f"rrs:admin:{scan_id}", 86400 * 7, json.dumps(admin_report))
-                r.setex(f"rrs:forwardable:{scan_id}", 86400 * 7, forwardable_md)
-                print(f"[Admin report saved] {scan_id} -> redis")
-            except Exception as e:
-                print(f"[Redis save failed, falling back to memory] {e}")
-                _in_memory_reports[scan_id] = admin_report
-                _in_memory_forwardable[scan_id] = forwardable_md
-                print(f"[Admin report saved] {scan_id} -> memory")
-        else:
-            _in_memory_reports[scan_id] = admin_report
-            _in_memory_forwardable[scan_id] = forwardable_md
-            print(f"[Admin report saved] {scan_id} -> memory")
-
-        # Generate pretty HTML using email_sender
-        from email_sender import ReportEmailer
-        emailer = ReportEmailer()
-        html_body = emailer._render_admin_html(admin_report)
-        full_html = emailer._build_html_wrapper(f"[ADMIN] Revenue Readiness — {url}", html_body)
-
-        # Email to admin via Resend
-        if ADMIN_REPORT_AUTO_SEND and RESEND_API_KEY and RESEND_AVAILABLE:
-            print(f"[Resend] Attempting to send to {ADMIN_EMAIL} using key prefix: {RESEND_API_KEY[:8]}...")
-            try:
-                resend.api_key = RESEND_API_KEY
-                resend.Emails.send({
-                    "from": EMAIL_FROM,
-                    "to": ADMIN_EMAIL,
-                    "subject": f"[ADMIN] Revenue Readiness — {url}",
-                    "html": full_html,
-                    "text": forwardable_md,
-                })
-                print(f"[Admin email sent] {ADMIN_EMAIL} for {url}")
-            except Exception as e:
-                print(f"[Admin email failed] {e}")
-        else:
-            try:
-                emailer.send_admin_report(reporter, ADMIN_EMAIL)
-                print(f"[Admin SMTP email sent] {ADMIN_EMAIL} for {url}")
-            except Exception as e:
-                print(f"[Admin SMTP email failed] {e}")
-
-    except Exception as e:
-        print(f"[Admin report processing failed] {e}")
+    return {
+        "status": "SUCCESS",
+        "target_url": target_url,
+        "client_tier": client_tier,
+        "report_file": output_filename,
+        "report_data": report_payload
+    }
 
 
-# ── Admin Report Retrieval (PROTECTED — requires API key) ──────────────────
-
-@app.get("/api/v1/admin/reports", dependencies=[Depends(verify_admin)])
-async def list_admin_reports(limit: int = 20):
-    """List recent admin reports from Redis or Memory. Owner only."""
-    if REDIS_AVAILABLE:
-        try:
-            r = redis.from_url(REDIS_URL)
-            keys = r.keys("rrs:admin:*")[:limit]
-            reports = []
-            for key in keys:
-                key_str = key.decode() if isinstance(key, bytes) else key
-                data = r.get(key_str)
-                if data:
-                    reports.append({
-                        "id": key_str.replace("rrs:admin:", ""),
-                        "key": key_str,
-                        "size": len(data),
-                    })
-            return {"reports": reports, "source": "redis"}
-        except Exception as e:
-            print(f"Redis fetch failed: {e}. Falling back to memory.")
-            
-    reports = []
-    for k, v in list(_in_memory_reports.items())[:limit]:
-        reports.append({
-            "id": k,
-            "key": f"rrs:admin:{k}",
-            "size": len(str(v))
-        })
-    return {"reports": reports, "source": "memory"}
-
-
-@app.get("/api/v1/admin/report/{scan_id}", dependencies=[Depends(verify_admin)])
-async def get_admin_report(scan_id: str):
-    """Get a specific admin report. Owner only."""
-    if REDIS_AVAILABLE:
-        try:
-            r = redis.from_url(REDIS_URL)
-            data = r.get(f"rrs:admin:{scan_id}")
-            if data:
-                return json.loads(data)
-        except Exception:
-            pass
-
-    if scan_id in _in_memory_reports:
-        return _in_memory_reports[scan_id]
-        
-    raise HTTPException(status_code=404, detail="Report not found")
-
-
-@app.get("/api/v1/admin/report/{scan_id}/forwardable", dependencies=[Depends(verify_admin)])
-async def get_forwardable_report(scan_id: str):
-    """Get the forwardable markdown report. Owner only."""
-    if REDIS_AVAILABLE:
-        try:
-            r = redis.from_url(REDIS_URL)
-            data = r.get(f"rrs:forwardable:{scan_id}")
-            if data:
-                return {"markdown": data.decode() if isinstance(data, bytes) else data}
-        except Exception:
-            pass
-            
-    if scan_id in _in_memory_forwardable:
-        return {"markdown": _in_memory_forwardable[scan_id]}
-
-    raise HTTPException(status_code=404, detail="Report not found")
-
-
-# ── Main entry ──────────────────────────────────────────────────────────────
+# ── Main Entrypoint ─────────────────────────────────────────────────────────
 
 if __name__ == "__main__":
     import uvicorn
     port = int(os.environ.get("PORT", "8000"))
-    host = os.environ.get("HOST", "127.0.0.1")
+    host = os.environ.get("HOST", "0.0.0.0")
     uvicorn.run("api:app", host=host, port=port, reload=False)
