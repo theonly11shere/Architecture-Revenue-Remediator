@@ -2,20 +2,25 @@ import sys
 import os
 import time
 import logging
+import inspect
 import requests
 import resend
 from typing import Optional, Dict, Any
-from fastapi import FastAPI, HTTPException, BackgroundTasks
+from fastapi import FastAPI, HTTPException, BackgroundTasks, Response
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
-# Path resolution for local imports
+# Path resolution for local imports (handles both root folder and /app subfolder)
 current_dir = os.path.dirname(os.path.abspath(__file__))
-if current_dir not in sys.path:
-    sys.path.insert(0, current_dir)
+app_dir = os.path.join(current_dir, "app")
 
+for path in [current_dir, app_dir]:
+    if os.path.exists(path) and path not in sys.path:
+        sys.path.insert(0, path)
+
+# Module imports with fallbacks
 try:
     import scraper
 except ImportError:
@@ -34,13 +39,18 @@ app = FastAPI(
     version="1.0.0"
 )
 
-# CORS Middleware Setup
+# CORS Middleware Setup - Allows production domains and local dev environments
 app.add_middleware(
     CORSMiddleware,
     allow_origins=[
         "https://trilloka.com",
         "https://www.trilloka.com",
+        "https://api.trilloka.com",
         "http://localhost:3000",
+        "http://localhost:5500",
+        "http://127.0.0.1:5500",
+        "http://localhost:5173",
+        "http://localhost:8000",
         "http://127.0.0.1:8000"
     ],
     allow_credentials=True,
@@ -48,7 +58,7 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Initialize Resend
+# Initialize Resend API Key
 resend.api_key = os.getenv("RESEND_API_KEY", "")
 
 class AuditRequest(BaseModel):
@@ -67,7 +77,7 @@ def send_audit_email_background(to_email: str, target_url: str, score: int, leak
     if not resend.api_key or not to_email:
         return
     
-    leaks_html = "".join([f"<li><strong>{leak.get('title')}</strong>: {leak.get('description')}</li>" for leak in leaks])
+    leaks_html = "".join([f"<li><strong>{leak.get('title', 'Issue')}</strong>: {leak.get('description', '')}</li>" for leak in leaks])
     
     html_content = f"""
     <h2>Your Trilloka Audit Report for {target_url}</h2>
@@ -85,28 +95,49 @@ def send_audit_email_background(to_email: str, target_url: str, score: int, leak
             "html": html_content
         })
     except Exception as e:
-        logger.error(f"Failed to send email: {str(e)}")
+        logger.error(f"Failed to send email via Resend: {str(e)}")
+
+# Helper function to safely serve HTML files
+def safe_file_response(filename: str):
+    file_path = os.path.join(current_dir, filename)
+    if os.path.exists(file_path):
+        return FileResponse(file_path)
+    return JSONResponse(status_code=404, content={"error": f"File '{filename}' not found on server."})
+
+# Favicon route to prevent 404 logs in console
+@app.get("/favicon.ico", include_in_schema=False)
+async def favicon():
+    favicon_path = os.path.join(current_dir, "favicon.ico")
+    if os.path.exists(favicon_path):
+        return FileResponse(favicon_path)
+    return Response(status_code=204)
 
 # HTML Page Routing
 @app.get("/")
 async def serve_index():
-    return FileResponse(os.path.join(current_dir, "index.html"))
+    return safe_file_response("index.html")
 
 @app.get("/solutions")
 async def serve_solutions():
-    return FileResponse(os.path.join(current_dir, "solutions.html"))
+    return safe_file_response("solutions.html")
 
 @app.get("/why-us")
 async def serve_why_us():
-    return FileResponse(os.path.join(current_dir, "why-us.html"))
+    return safe_file_response("why-us.html")
 
 @app.get("/vlog")
 async def serve_vlog():
-    return FileResponse(os.path.join(current_dir, "vlog.html"))
+    return safe_file_response("vlog.html")
 
 @app.get("/health")
 async def health_check():
-    return {"status": "healthy"}
+    return {
+        "status": "healthy",
+        "modules": {
+            "scraper_loaded": scraper is not None,
+            "scorer_loaded": scorer is not None
+        }
+    }
 
 @app.post("/api/audit", response_model=AuditResponse)
 async def run_audit(payload: AuditRequest, background_tasks: BackgroundTasks):
@@ -120,25 +151,35 @@ async def run_audit(payload: AuditRequest, background_tasks: BackgroundTasks):
     audit_result = {}
 
     try:
-        # 1. Asynchronously crawl target URL using scraper.py
+        # 1. Scrape target URL (handles both sync and async functions gracefully)
         if scraper and hasattr(scraper, 'fetch_and_extract'):
             try:
-                scraped_data = await scraper.fetch_and_extract(target_url)
+                if inspect.iscoroutinefunction(scraper.fetch_and_extract):
+                    scraped_data = await scraper.fetch_and_extract(target_url)
+                else:
+                    scraped_data = scraper.fetch_and_extract(target_url)
             except Exception as e:
                 logger.error(f"Scraper execution failed: {str(e)}")
 
-        # 2. Pass live scraped dataset into scorer.py to compute score and leaks
+        # 2. Score target URL (handles both sync and async functions gracefully)
         if scorer and hasattr(scorer, 'run_architectural_audit'):
             try:
-                audit_result = scorer.run_architectural_audit(
-                    url=target_url,
-                    business_type=payload.business_type,
-                    scraped_data=scraped_data
-                )
+                if inspect.iscoroutinefunction(scorer.run_architectural_audit):
+                    audit_result = await scorer.run_architectural_audit(
+                        url=target_url,
+                        business_type=payload.business_type,
+                        scraped_data=scraped_data
+                    )
+                else:
+                    audit_result = scorer.run_architectural_audit(
+                        url=target_url,
+                        business_type=payload.business_type,
+                        scraped_data=scraped_data
+                    )
             except Exception as e:
                 logger.error(f"Scorer execution failed: {str(e)}")
 
-        # Fallback if scorer is unavailable
+        # Fallback default response if scorer module is missing or fails
         if not audit_result or "readiness_score" not in audit_result:
             audit_result = {
                 "readiness_score": 75,
@@ -150,7 +191,7 @@ async def run_audit(payload: AuditRequest, background_tasks: BackgroundTasks):
 
         calculated_score = int(audit_result.get("readiness_score", 75))
 
-        # Send report email in background if provided
+        # Queue report email in background if email was supplied
         if payload.email:
             background_tasks.add_task(
                 send_audit_email_background,
@@ -160,7 +201,7 @@ async def run_audit(payload: AuditRequest, background_tasks: BackgroundTasks):
                 leaks=audit_result.get("leaks", [])
             )
 
-        # Build response details joining scraper DOM telemetry with scorer vitals
+        # Build final response details
         response_details = {
             "target_url": target_url,
             "business_type": payload.business_type,
@@ -190,7 +231,7 @@ async def run_audit(payload: AuditRequest, background_tasks: BackgroundTasks):
         logger.error(f"Error during scan for {payload.url}: {str(e)}")
         raise HTTPException(status_code=500, detail=f"Scan execution error: {str(e)}")
 
-# Secure Static Mounting
+# Mount static directory safely
 static_dir = os.path.join(current_dir, "static")
 if not os.path.exists(static_dir):
     os.makedirs(static_dir, exist_ok=True)
