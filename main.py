@@ -48,8 +48,13 @@ async def run_audit(payload: AuditRequest):
         b_type = payload.business_type.strip()
 
         # 1. Execute Scraper & Scorer
-        scraped_data = scrape_website(url) 
-        score_results = score_audit(scraped_data, b_type) 
+        scraped_data = await scrape_website(url) 
+        score_results = score_audit(scraped_data, b_type)
+
+        return score_results
+
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e)) 
 
         clean_domain = url.replace("https://", "").replace("http://", "").split("/")[0]
 
