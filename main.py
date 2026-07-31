@@ -3,7 +3,7 @@ import os
 import time
 import logging
 import requests
-from bs4 import BeautifulSoup
+import resend
 from typing import Optional, Dict, Any
 from fastapi import FastAPI, HTTPException, BackgroundTasks
 from fastapi.middleware.cors import CORSMiddleware
@@ -41,6 +41,9 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+# Initialize Resend
+resend.api_key = os.getenv("RESEND_API_KEY", "")
+
 class AuditRequest(BaseModel):
     url: str
     business_type: str
@@ -52,6 +55,30 @@ class AuditResponse(BaseModel):
     summary: str
     details: Dict[str, Any]
     email_status: Optional[str] = None
+
+def send_audit_email_background(to_email: str, target_url: str, score: int, leaks: list):
+    if not resend.api_key or not to_email:
+        return
+    
+    leaks_html = "".join([f"<li><strong>{leak.get('title')}</strong>: {leak.get('description')}</li>" for leak in leaks])
+    
+    html_content = f"""
+    <h2>Your Trilloka Audit Report for {target_url}</h2>
+    <p><strong>Revenue Readiness Score:</strong> {score}/100</p>
+    <h3>Detected Revenue Leaks:</h3>
+    <ul>{leaks_html}</ul>
+    <p>Log back into Trilloka to view your full architectural remediation plan.</p>
+    """
+    
+    try:
+        resend.Emails.send({
+            "from": "audit@trilloka.com",
+            "to": [to_email],
+            "subject": f"Audit Report & Revenue Leaks for {target_url}",
+            "html": html_content
+        })
+    except Exception as e:
+        logger.error(f"Failed to send email: {str(e)}")
 
 # Clean URL HTML Routing
 @app.get("/")
@@ -103,11 +130,20 @@ async def run_audit(payload: AuditRequest, background_tasks: BackgroundTasks):
                 "readiness_score": 75,
                 "conversion_risk": "Moderate",
                 "leaks": [
-                    {"title": "General Conversion Friction", "desc": "Landing layout lacks immediate trust signals above the fold."}
+                    {"title": "General Conversion Friction", "description": "Landing layout lacks immediate trust signals above the fold."}
                 ]
             }
 
         calculated_score = int(audit_result.get("readiness_score", 75))
+
+        if payload.email:
+            background_tasks.add_task(
+                send_audit_email_background,
+                to_email=payload.email,
+                target_url=target_url,
+                score=calculated_score,
+                leaks=audit_result.get("leaks", [])
+            )
 
         return AuditResponse(
             status="success",
