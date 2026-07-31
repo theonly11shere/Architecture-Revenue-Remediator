@@ -240,7 +240,11 @@ class WebScraper:
         }
 
 
-# Direct entrypoint helper for main.py / FastAPI endpoints
+# Compatibility wrappers matching main.py imports
+async def scrape_website(url: str) -> Dict[str, Any]:
+    scraper = WebScraper()
+    return await scraper.scrape(url)
+
 async def fetch_and_extract(url: str) -> Dict[str, Any]:
     scraper = WebScraper()
     return await scraper.scrape(url)
