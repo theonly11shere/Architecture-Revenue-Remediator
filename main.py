@@ -1,16 +1,21 @@
-import sys
-import os
-import time
-import logging
 import inspect
-import requests
-import resend
-from typing import Optional, Dict, Any
-from fastapi import FastAPI, HTTPException, BackgroundTasks, Response
+import logging
+import os
+import sys
+import time
+from typing import Any, Dict, Optional
+
+from fastapi import BackgroundTasks, FastAPI, HTTPException, Response
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
+import requests
+import resend
+
+# Setup Logging
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger("trilloka_audit")
 
 # Path resolution for local imports (handles both root folder and /app subfolder)
 current_dir = os.path.dirname(os.path.abspath(__file__))
@@ -20,19 +25,20 @@ for path in [current_dir, app_dir]:
     if os.path.exists(path) and path not in sys.path:
         sys.path.insert(0, path)
 
-# Module imports with fallbacks
+# Module imports with fallbacks and explicit error logging
+scraper = None
 try:
     import scraper
-except ImportError:
-    scraper = None
+    logger.info("Successfully loaded scraper module.")
+except Exception as e:
+    logger.error(f"Failed to import scraper module: {str(e)}")
 
+scorer = None
 try:
     import scorer
-except ImportError:
-    scorer = None
-
-logging.basicConfig(level=logging.INFO)
-logger = logging.getLogger("trilloka_audit")
+    logger.info("Successfully loaded scorer module.")
+except Exception as e:
+    logger.error(f"Failed to import scorer module: {str(e)}")
 
 app = FastAPI(
     title="Trilloka Audit Scanner API",
@@ -77,7 +83,10 @@ def send_audit_email_background(to_email: str, target_url: str, score: int, leak
     if not resend.api_key or not to_email:
         return
     
-    leaks_html = "".join([f"<li><strong>{leak.get('title', 'Issue')}</strong>: {leak.get('description', '')}</li>" for leak in leaks])
+    leaks_html = "".join([
+        f"<li><strong>{leak.get('title', 'Issue')}</strong>: {leak.get('description', '')}</li>" 
+        for leak in leaks
+    ])
     
     html_content = f"""
     <h2>Your Trilloka Audit Report for {target_url}</h2>
@@ -112,7 +121,7 @@ async def favicon():
         return FileResponse(favicon_path)
     return Response(status_code=204)
 
-# HTML Page Routing
+# Static HTML Page Routing
 @app.get("/")
 async def serve_index():
     return safe_file_response("index.html")
@@ -129,7 +138,9 @@ async def serve_why_us():
 async def serve_vlog():
     return safe_file_response("vlog.html")
 
+# Health check endpoints (available at both /health and /api/health)
 @app.get("/health")
+@app.get("/api/health")
 async def health_check():
     return {
         "status": "healthy",
