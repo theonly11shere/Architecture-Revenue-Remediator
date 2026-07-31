@@ -1,4 +1,4 @@
-# Revenue Readiness Scorer
+# Architecture Revenue Remediation
 
 A rule-based website analysis tool that scores trustworthiness, revenue potential, and Google AI-era penalty risk.
 
