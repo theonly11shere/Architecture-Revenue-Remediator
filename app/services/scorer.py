@@ -2,7 +2,7 @@ import uuid
 import time
 import requests
 from bs4 import BeautifulSoup
-from typing import Dict, Any, List
+from typing import Dict, Any, List, Optional
 
 INDUSTRY_PROBLEM_LIBRARY = {
     "ecommerce": {
@@ -109,53 +109,114 @@ INDUSTRY_PROBLEM_LIBRARY = {
     }
 }
 
-def run_architectural_audit(url: str, business_type: str) -> Dict[str, Any]:
+BROWSER_HEADERS = {
+    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36",
+    "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8",
+    "Accept-Language": "en-US,en;q=0.5",
+}
+
+def run_architectural_audit(url: str, business_type: str, scraped_data: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
     scan_id = f"scan_{uuid.uuid4().hex[:10]}"
     start_time = time.time()
     
     target = url if url.startswith(("http://", "https://")) else f"https://{url}"
     
-    clean_type = business_type.lower().strip()
+    clean_type = (business_type or "b2b").lower().strip()
     if clean_type not in INDUSTRY_PROBLEM_LIBRARY:
         clean_type = "b2b"
         
     profile = INDUSTRY_PROBLEM_LIBRARY[clean_type]
-    leaks = profile["leaks"]
+    detected_leaks = list(profile["leaks"])
 
-    status_code = None
+    status_code = 200
     response_time_ms = 0
     title_tag = ""
     meta_desc = ""
     has_ssl = target.startswith("https://")
     
-    try:
-        response = requests.get(
-            target, 
-            timeout=8, 
-            headers={"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) TrillokaPredictor/2.0"}
-        )
-        status_code = response.status_code
-        response_time_ms = int((time.time() - start_time) * 1000)
-        
-        soup = BeautifulSoup(response.text, "html.parser")
-        title_tag = soup.title.string.strip() if soup.title and soup.title.string else ""
-        
-        meta_tag = soup.find("meta", attrs={"name": "description"})
-        if meta_tag and meta_tag.get("content"):
-            meta_desc = meta_tag["content"].strip()
-    except Exception:
-        response_time_ms = 450
+    if scraped_data and scraped_data.get("is_success"):
+        # Utilize pre-scraped data if provided by WebScraper
+        response_time_ms = int(scraped_data.get("load_time_ms", 120))
+        status_code = scraped_data.get("status_code", 200)
+        has_ssl = scraped_data.get("ssl_enabled", True)
+        title_tag = scraped_data.get("meta", {}).get("title") or ""
+        meta_desc = scraped_data.get("meta", {}).get("description") or ""
+    else:
+        # Perform fallback direct HTTP fetch
+        try:
+            response = requests.get(
+                target, 
+                timeout=8, 
+                headers=BROWSER_HEADERS
+            )
+            status_code = response.status_code
+            response_time_ms = int((time.time() - start_time) * 1000)
+            
+            soup = BeautifulSoup(response.text, "html.parser")
+            
+            # Safe title extraction
+            if soup.title:
+                title_tag = soup.title.get_text(strip=True)
+            
+            # Safe meta description extraction
+            meta_tag = soup.find("meta", attrs={"name": "description"}) or soup.find("meta", attrs={"property": "og:description"})
+            if meta_tag and meta_tag.get("content"):
+                meta_desc = str(meta_tag["content"]).strip()
 
-    readiness_score = max(35, 100 - (len(leaks) * 15))
-    
+        except Exception:
+            response_time_ms = 450
+            status_code = 500
+
+    # Dynamic Scoring Penalty System
+    score_deductions = 0
+
+    if not has_ssl:
+        score_deductions += 15
+        detected_leaks.append({
+            "title": "Insecure Connection (Missing SSL)",
+            "description": "Your site is served over HTTP, triggering browser security warnings and destroying visitor trust."
+        })
+
+    if not title_tag:
+        score_deductions += 10
+        detected_leaks.append({
+            "title": "Missing Primary Meta Title",
+            "description": "The site lacks a defined HTML title tag, severely harming SEO positioning and search snippet CTR."
+        })
+
+    if not meta_desc:
+        score_deductions += 10
+        detected_leaks.append({
+            "title": "Missing Search Meta Description",
+            "description": "Search engines are forcing automated text snippets because no primary meta description is configured."
+        })
+
+    if response_time_ms > 2500:
+        score_deductions += 15
+        detected_leaks.append({
+            "title": "High Server Response Latency",
+            "description": f"Initial page load latency reached {response_time_ms}ms, exceeding the 1.5s mobile drop-off threshold."
+        })
+
+    base_score = 85 - (len(profile["leaks"]) * 5)
+    readiness_score = max(30, min(98, base_score - score_deductions))
+
+    # Determine risk category for main.py integration
+    if readiness_score >= 80:
+        conversion_risk = "Low"
+    elif readiness_score >= 60:
+        conversion_risk = "Moderate"
+    else:
+        conversion_risk = "High"
+
     seo_vitals = {
         "response_latency_ms": response_time_ms,
         "ssl_integrity": "Valid HTTPS" if has_ssl else "Insecure HTTP",
-        "http_status": status_code or 200,
+        "http_status": status_code,
         "title_tag_present": bool(title_tag),
         "title_tag_length": len(title_tag),
         "meta_description_present": bool(meta_desc),
-        "technical_health_score": 88 if has_ssl and title_tag else 62
+        "technical_health_score": max(40, 100 - score_deductions)
     }
 
     return {
@@ -168,9 +229,10 @@ def run_architectural_audit(url: str, business_type: str) -> Dict[str, Any]:
         "presence_score": 20,
         "visual_twin_score": 10,
         "readiness_score": readiness_score,
+        "conversion_risk": conversion_risk,  # Key required by main.py
         "evidence_score": 45,
         "confidence_score": 80,
         "ai_risk_score": 70,
-        "leaks": leaks,
+        "leaks": detected_leaks,
         "add_on_metrics": seo_vitals
     }

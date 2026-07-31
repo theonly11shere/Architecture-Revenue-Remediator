@@ -19,9 +19,9 @@ class WebScraper:
         "User-Agent": (
             "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
             "AppleWebKit/537.36 (KHTML, like Gecko) "
-            "Chrome/124.0.0.0 Safari/537.36 AuditScanner/1.0"
+            "Chrome/126.0.0.0 Safari/537.36 AuditScanner/2.0"
         ),
-        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8",
         "Accept-Language": "en-US,en;q=0.5",
     }
 
@@ -51,7 +51,6 @@ class WebScraper:
         """
         Scrapes a target URL and returns a structured dictionary for scorer.py.
         """
-        # Ensure scheme is present
         if not url.startswith(("http://", "https://")):
             url = f"https://{url}"
 
@@ -62,7 +61,7 @@ class WebScraper:
                 headers=self.DEFAULT_HEADERS,
                 follow_redirects=True,
                 timeout=self.timeout,
-                verify=False  # Allows auditing sites with SSL warnings without crashing
+                verify=False  # Allows auditing sites with self-signed or invalid SSL without crashing
             ) as client:
                 response = await client.get(url)
                 load_time_ms = round((time.time() - start_time) * 1000, 2)
@@ -72,30 +71,30 @@ class WebScraper:
                 final_url = str(response.url)
                 headers = dict(response.headers)
 
-        except httpx.RequestError as exc:
-            return self._build_error_response(url, f"Network request failed: {str(exc)}")
+            # Parse DOM safely with BeautifulSoup
+            soup = BeautifulSoup(html_content, "html.parser")
 
-        # Parse DOM with BeautifulSoup
-        soup = BeautifulSoup(html_content, "html.parser")
+            return {
+                "url": final_url,
+                "original_url": url,
+                "status_code": status_code,
+                "is_success": 200 <= status_code < 300,
+                "load_time_ms": load_time_ms,
+                "ssl_enabled": final_url.startswith("https://"),
+                "security_headers": self._extract_security_headers(headers),
+                "meta": self._extract_meta_data(soup),
+                "headings": self._extract_headings(soup),
+                "images": self._extract_image_stats(soup),
+                "social_signals": self._extract_social_signals(soup),
+                "cta_elements": self._extract_cta_elements(soup),
+                "analytics_tags": self._extract_analytics_tags(html_content),
+                "schema_markup": self._extract_schema_markup(soup),
+                "html_length": len(html_content),
+            }
 
-        # Package extracted metrics
-        return {
-            "url": final_url,
-            "original_url": url,
-            "status_code": status_code,
-            "is_success": 200 <= status_code < 300,
-            "load_time_ms": load_time_ms,
-            "ssl_enabled": final_url.startswith("https://"),
-            "security_headers": self._extract_security_headers(headers),
-            "meta": self._extract_meta_data(soup),
-            "headings": self._extract_headings(soup),
-            "images": self._extract_image_stats(soup),
-            "social_signals": self._extract_social_signals(soup),
-            "cta_elements": self._extract_cta_elements(soup),
-            "analytics_tags": self._extract_analytics_tags(html_content),
-            "schema_markup": self._extract_schema_markup(soup),
-            "html_length": len(html_content),
-        }
+        except Exception as exc:
+            # Catch all network & parsing exceptions cleanly
+            return self._build_error_response(url, f"Audit crawl failed: {str(exc)}")
 
     def _extract_meta_data(self, soup: BeautifulSoup) -> Dict[str, Any]:
         title_tag = soup.find("title")
@@ -107,8 +106,12 @@ class WebScraper:
         og_image = soup.find("meta", attrs={"property": "og:image"})
         twitter_card = soup.find("meta", attrs={"name": "twitter:card"}) or soup.find("meta", attrs={"property": "twitter:card"})
 
-        title_str = title_tag.string.strip() if title_tag and title_tag.string else None
-        desc_str = meta_desc.get("content", "").strip() if meta_desc and meta_desc.get("content") else None
+        # Safe text extraction to prevent AttributeError on empty or nested tags
+        title_str = title_tag.get_text(strip=True) if title_tag else None
+        
+        desc_str = None
+        if meta_desc and meta_desc.get("content"):
+            desc_str = str(meta_desc["content"]).strip() or None
 
         return {
             "title": title_str,
@@ -116,14 +119,14 @@ class WebScraper:
             "description": desc_str,
             "description_length": len(desc_str) if desc_str else 0,
             "has_viewport": bool(viewport),
-            "canonical_url": canonical.get("href") if canonical else None,
+            "canonical_url": canonical.get("href") if canonical and canonical.get("href") else None,
             "has_og_tags": bool(og_title or og_image),
             "has_twitter_card": bool(twitter_card),
         }
 
     def _extract_headings(self, soup: BeautifulSoup) -> Dict[str, Any]:
-        h1s = [h.get_text(strip=True) for h in soup.find_all("h1")]
-        h2s = [h.get_text(strip=True) for h in soup.find_all("h2")]
+        h1s = [h.get_text(strip=True) for h in soup.find_all("h1") if h.get_text(strip=True)]
+        h2s = [h.get_text(strip=True) for h in soup.find_all("h2") if h.get_text(strip=True)]
         return {
             "h1_count": len(h1s),
             "h2_count": len(h2s),
@@ -133,7 +136,7 @@ class WebScraper:
     def _extract_image_stats(self, soup: BeautifulSoup) -> Dict[str, Any]:
         images = soup.find_all("img")
         total_images = len(images)
-        missing_alt = sum(1 for img in images if not img.get("alt") or not img.get("alt").strip())
+        missing_alt = sum(1 for img in images if not img.get("alt") or not str(img.get("alt")).strip())
         return {
             "total_images": total_images,
             "missing_alt_count": missing_alt,
@@ -142,7 +145,7 @@ class WebScraper:
 
     def _extract_social_signals(self, soup: BeautifulSoup) -> Dict[str, Any]:
         found_links = {}
-        all_links = [a.get("href") for a in soup.find_all("a", href=True)]
+        all_links = [str(a.get("href")) for a in soup.find_all("a", href=True)]
 
         for platform, domain in self.SOCIAL_DOMAINS.items():
             matching_links = [link for link in all_links if domain in link.lower()]
@@ -170,7 +173,7 @@ class WebScraper:
                 matching_ctas.append(text[:50])
 
         forms = soup.find_all("form")
-        phone_links = [a.get("href") for a in soup.find_all("a", href=True) if a.get("href").startswith("tel:")]
+        phone_links = [a.get("href") for a in soup.find_all("a", href=True) if str(a.get("href")).startswith("tel:")]
 
         return {
             "has_cta_buttons": len(matching_ctas) > 0,

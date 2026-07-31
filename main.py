@@ -11,6 +11,7 @@ from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
+# Path resolution for local imports
 current_dir = os.path.dirname(os.path.abspath(__file__))
 if current_dir not in sys.path:
     sys.path.insert(0, current_dir)
@@ -33,9 +34,15 @@ app = FastAPI(
     version="1.0.0"
 )
 
+# CORS Middleware Setup
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=[
+        "https://trilloka.com",
+        "https://www.trilloka.com",
+        "http://localhost:3000",
+        "http://127.0.0.1:8000"
+    ],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -46,7 +53,7 @@ resend.api_key = os.getenv("RESEND_API_KEY", "")
 
 class AuditRequest(BaseModel):
     url: str
-    business_type: str
+    business_type: Optional[str] = "General"
     email: Optional[str] = None
 
 class AuditResponse(BaseModel):
@@ -80,7 +87,7 @@ def send_audit_email_background(to_email: str, target_url: str, score: int, leak
     except Exception as e:
         logger.error(f"Failed to send email: {str(e)}")
 
-# Clean URL HTML Routing
+# HTML Page Routing
 @app.get("/")
 async def serve_index():
     return FileResponse(os.path.join(current_dir, "index.html"))
@@ -105,26 +112,33 @@ async def health_check():
 async def run_audit(payload: AuditRequest, background_tasks: BackgroundTasks):
     logger.info(f"Executing audit scan for URL: {payload.url} [{payload.business_type}]")
     
-    target_url = payload.url
+    target_url = payload.url.strip()
     if not target_url.startswith(('http://', 'https://')):
         target_url = 'https://' + target_url
 
-    raw_crawl = {}
+    scraped_data = {}
     audit_result = {}
 
     try:
+        # 1. Asynchronously crawl target URL using scraper.py
+        if scraper and hasattr(scraper, 'fetch_and_extract'):
+            try:
+                scraped_data = await scraper.fetch_and_extract(target_url)
+            except Exception as e:
+                logger.error(f"Scraper execution failed: {str(e)}")
+
+        # 2. Pass live scraped dataset into scorer.py to compute score and leaks
         if scorer and hasattr(scorer, 'run_architectural_audit'):
             try:
-                audit_result = scorer.run_architectural_audit(target_url, payload.business_type)
-                raw_crawl = {
-                    "url": target_url,
-                    "load_time_ms": audit_result.get("add_on_metrics", {}).get("response_latency_ms", 120),
-                    "ssl_enabled": audit_result.get("add_on_metrics", {}).get("ssl_integrity") == "Valid HTTPS",
-                    "meta": {"title": "Active Target"}
-                }
+                audit_result = scorer.run_architectural_audit(
+                    url=target_url,
+                    business_type=payload.business_type,
+                    scraped_data=scraped_data
+                )
             except Exception as e:
                 logger.error(f"Scorer execution failed: {str(e)}")
 
+        # Fallback if scorer is unavailable
         if not audit_result or "readiness_score" not in audit_result:
             audit_result = {
                 "readiness_score": 75,
@@ -136,6 +150,7 @@ async def run_audit(payload: AuditRequest, background_tasks: BackgroundTasks):
 
         calculated_score = int(audit_result.get("readiness_score", 75))
 
+        # Send report email in background if provided
         if payload.email:
             background_tasks.add_task(
                 send_audit_email_background,
@@ -145,23 +160,39 @@ async def run_audit(payload: AuditRequest, background_tasks: BackgroundTasks):
                 leaks=audit_result.get("leaks", [])
             )
 
+        # Build response details joining scraper DOM telemetry with scorer vitals
+        response_details = {
+            "target_url": target_url,
+            "business_type": payload.business_type,
+            "load_time_ms": scraped_data.get("load_time_ms") or audit_result.get("add_on_metrics", {}).get("response_latency_ms", 120),
+            "ssl_enabled": scraped_data.get("ssl_enabled") if "ssl_enabled" in scraped_data else audit_result.get("add_on_metrics", {}).get("ssl_integrity") == "Valid HTTPS",
+            "has_title": scraped_data.get("meta", {}).get("title") is not None if scraped_data else True,
+            "title_text": scraped_data.get("meta", {}).get("title") if scraped_data else None,
+            "meta_description": scraped_data.get("meta", {}).get("description") if scraped_data else None,
+            "heading_structure": scraped_data.get("headings", {}),
+            "image_stats": scraped_data.get("images", {}),
+            "social_signals": scraped_data.get("social_signals", {}),
+            "cta_elements": scraped_data.get("cta_elements", {}),
+            "analytics_tags": scraped_data.get("analytics_tags", {}),
+            "revenue_leak_risk": audit_result.get("conversion_risk", "Moderate"),
+            "leaks": audit_result.get("leaks", []),
+            "seo_vitals": audit_result.get("add_on_metrics", {})
+        }
+
         return AuditResponse(
             status="success",
             score=calculated_score,
             summary=f"Audit completed successfully for {payload.url}.",
-            details={
-                "target_url": target_url,
-                "business_type": payload.business_type,
-                "load_time_ms": raw_crawl.get("load_time_ms", 120),
-                "ssl_enabled": raw_crawl.get("ssl_enabled", True),
-                "has_title": True,
-                "revenue_leak_risk": audit_result.get("conversion_risk", "Moderate"),
-                "leaks": audit_result.get("leaks", [])
-            }
+            details=response_details
         )
 
     except Exception as e:
         logger.error(f"Error during scan for {payload.url}: {str(e)}")
         raise HTTPException(status_code=500, detail=f"Scan execution error: {str(e)}")
 
-app.mount("/static", StaticFiles(directory=current_dir), name="static")
+# Secure Static Mounting
+static_dir = os.path.join(current_dir, "static")
+if not os.path.exists(static_dir):
+    os.makedirs(static_dir, exist_ok=True)
+
+app.mount("/static", StaticFiles(directory=static_dir), name="static")
