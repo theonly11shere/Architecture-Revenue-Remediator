@@ -1,1 +1,1 @@
-web: uvicorn api.api:app --host 0.0.0.0 --port ${PORT:-8000}
+web: python -c "import uvicorn, os; uvicorn.run('api.api:app', host='0.0.0.0', port=int(os.environ.get('PORT', 8000)))"
