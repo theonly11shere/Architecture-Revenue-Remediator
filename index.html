@@ -4,7 +4,332 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Trilloka — Architectural Revenue Remediator</title>
-    <link rel="stylesheet" href="/static/styles.css">
+    <style>
+        :root {
+            --bg-color: #0b0f19;
+            --card-bg: #111827;
+            --gold: #f59e0b;
+            --gold-hover: #d97706;
+            --text-main: #f9fafb;
+            --text-muted: #9ca3af;
+            --border-color: #1f2937;
+            --danger: #ef4444;
+        }
+
+        * {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+        }
+
+        body {
+            background-color: var(--bg-color);
+            color: var(--text-main);
+            min-height: 100vh;
+            display: flex;
+            flex-direction: column;
+        }
+
+        .site-header {
+            border-bottom: 1px solid var(--border-color);
+            background: rgba(11, 15, 25, 0.8);
+            backdrop-filter: blur(10px);
+            position: sticky;
+            top: 0;
+            z-index: 100;
+        }
+
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+            padding: 0 20px;
+        }
+
+        .nav-container {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            height: 70px;
+        }
+
+        .logo a {
+            font-size: 22px;
+            font-weight: 700;
+            color: var(--gold);
+            text-decoration: none;
+            letter-spacing: -0.5px;
+        }
+
+        .main-nav {
+            display: flex;
+            gap: 30px;
+        }
+
+        .main-nav a {
+            color: var(--text-muted);
+            text-decoration: none;
+            font-size: 14px;
+            font-weight: 500;
+            transition: color 0.2s;
+        }
+
+        .main-nav a:hover {
+            color: var(--gold);
+        }
+
+        .hero-section {
+            flex: 1;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            text-align: center;
+            padding: 60px 20px;
+        }
+
+        .hero-content {
+            max-width: 700px;
+        }
+
+        .hero-content h1 {
+            font-size: 48px;
+            font-weight: 800;
+            letter-spacing: -1px;
+            margin-bottom: 20px;
+            background: linear-gradient(to right, #fff, var(--text-muted));
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+        }
+
+        .hero-philosophy {
+            font-size: 18px;
+            color: var(--text-muted);
+            line-height: 1.6;
+            margin-bottom: 30px;
+        }
+
+        .console-input-wrap {
+            display: flex;
+            background: var(--card-bg);
+            border: 1px solid var(--border-color);
+            border-radius: 12px;
+            padding: 8px;
+            box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.3);
+        }
+
+        .console-input-wrap input {
+            flex: 1;
+            background: transparent;
+            border: none;
+            padding: 12px 16px;
+            color: #fff;
+            font-size: 16px;
+            outline: none;
+        }
+
+        .console-input-wrap input::placeholder {
+            color: #4b5563;
+        }
+
+        .btn {
+            background: var(--gold);
+            color: #000;
+            font-weight: 600;
+            border: none;
+            padding: 12px 24px;
+            border-radius: 8px;
+            cursor: pointer;
+            transition: background 0.2s;
+        }
+
+        .btn:hover {
+            background: var(--gold-hover);
+        }
+
+        /* Modal styling */
+        .modal-overlay {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: rgba(0, 0, 0, 0.8);
+            backdrop-filter: blur(5px);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            z-index: 1000;
+            padding: 20px;
+        }
+
+        .modal-card {
+            background: var(--card-bg);
+            border: 1px solid var(--border-color);
+            border-radius: 16px;
+            width: 100%;
+            max-width: 600px;
+            padding: 30px;
+            position: relative;
+            box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.5);
+        }
+
+        .modal-close {
+            position: absolute;
+            top: 20px;
+            right: 20px;
+            background: transparent;
+            border: none;
+            color: var(--text-muted);
+            font-size: 24px;
+            cursor: pointer;
+        }
+
+        .modal-close:hover {
+            color: #fff;
+        }
+
+        .modal-header h2 {
+            font-size: 22px;
+            margin-bottom: 5px;
+        }
+
+        .subtext {
+            color: var(--text-muted);
+            font-size: 13px;
+        }
+
+        .metrics-grid {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 15px;
+            margin: 20px 0;
+        }
+
+        .metric-box {
+            background: rgba(0, 0, 0, 0.2);
+            border: 1px solid var(--border-color);
+            padding: 15px;
+            border-radius: 10px;
+            text-align: center;
+        }
+
+        .metric-label {
+            display: block;
+            font-size: 12px;
+            color: var(--text-muted);
+            margin-bottom: 5px;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+
+        .metric-value {
+            font-size: 22px;
+            font-weight: 700;
+        }
+
+        .text-danger {
+            color: var(--danger);
+        }
+
+        .results-section {
+            margin-bottom: 20px;
+        }
+
+        .results-section h3, .tier-selection-section h3 {
+            font-size: 14px;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            color: var(--text-muted);
+            margin-bottom: 10px;
+        }
+
+        .gap-list {
+            background: rgba(0, 0, 0, 0.2);
+            border: 1px solid var(--border-color);
+            border-radius: 10px;
+            padding: 15px 15px 15px 30px;
+            max-height: 120px;
+            overflow-y: auto;
+        }
+
+        .tier-cards {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 15px;
+            margin-bottom: 25px;
+        }
+
+        .tier-option {
+            background: rgba(0, 0, 0, 0.2);
+            border: 1px solid var(--border-color);
+            border-radius: 10px;
+            padding: 15px;
+            text-align: center;
+        }
+
+        .tier-option.featured {
+            border-color: var(--gold);
+        }
+
+        .tier-option h4 {
+            font-size: 15px;
+            margin-bottom: 5px;
+        }
+
+        .tier-option p {
+            color: var(--gold);
+            font-size: 14px;
+            font-weight: 600;
+            margin-bottom: 12px;
+        }
+
+        .tier-option button, .modal-footer button {
+            background: transparent;
+            border: 1px solid var(--border-color);
+            color: #fff;
+            padding: 8px 12px;
+            border-radius: 6px;
+            font-size: 12px;
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+
+        .tier-option button:hover, .btn-secondary:hover {
+            border-color: #fff;
+        }
+
+        .tier-option.featured button {
+            background: var(--gold);
+            color: #000;
+            border-color: var(--gold);
+        }
+
+        .tier-option.featured button:hover {
+            background: var(--gold-hover);
+        }
+
+        .modal-footer {
+            display: flex;
+            justify-content: flex-end;
+            gap: 10px;
+            border-top: 1px solid var(--border-color);
+            padding-top: 20px;
+        }
+
+        .btn-primary {
+            background: var(--gold);
+            color: #000;
+            border: none;
+            padding: 10px 18px;
+            border-radius: 8px;
+            font-weight: 600;
+            cursor: pointer;
+        }
+
+        .btn-primary:hover {
+            background: var(--gold-hover);
+        }
+    </style>
 </head>
 <body>
 
@@ -47,7 +372,7 @@
                 <span id="modal-target-display" class="subtext"></span>
             </div>
 
-            <div class="modal-body">
+            <div class="modal-body" style="margin-top: 20px;">
                 <!-- Readiness Score & Key Metrics -->
                 <div class="metrics-grid">
                     <div class="metric-box">
@@ -75,12 +400,12 @@
                         <div class="tier-option">
                             <h4>Starter Fix</h4>
                             <p>$499 / one-time</p>
-                            <button onclick="selectTier('starter')">Deploy Starter</button>
+                            <button type="button" onclick="selectTier('starter')">Deploy Starter</button>
                         </div>
                         <div class="tier-option featured">
                             <h4>Full Architecture Remediator</h4>
                             <p>$1,499 / comprehensive</p>
-                            <button onclick="selectTier('full')">Deploy Full Remediator</button>
+                            <button type="button" onclick="selectTier('full')">Deploy Full Remediator</button>
                         </div>
                     </div>
                 </div>
@@ -131,7 +456,7 @@
                 risks.forEach(risk => {
                     const li = document.createElement('li');
                     li.textContent = risk;
-                    li.style.cssText = "color: #bbb; font-size: 13px; margin-bottom: 6px; list-style-type: disc; margin-left: 20px;";
+                    li.style.cssText = "color: #bbb; font-size: 13px; margin-bottom: 6px; list-style-type: disc;";
                     riskList.appendChild(li);
                 });
 
