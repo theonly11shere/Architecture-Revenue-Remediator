@@ -23,6 +23,7 @@ app.add_middleware(
 
 ADMIN_EMAIL = "onlyonearpit@gmail.com"
 
+
 class AuditRequest(BaseModel):
     url: str
     email: str
@@ -36,6 +37,9 @@ def send_admin_notification(prospect_email: str, prospect_url: str, audit_data: 
     print(f"Prospect Email: {prospect_email}")
     print(f"Prospect Target URL: {prospect_url}")
     print(f"Score: {audit_data.get('overall_score')}")
+    # Print the exact scraper error if score is 0.0
+    if audit_data.get("audit_metadata", {}).get("error"):
+        print(f"⚠️ SCRAPE ERROR: {audit_data['audit_metadata']['error']}")
     print("==================================================")
 
 
@@ -55,13 +59,13 @@ async def run_audit(payload: AuditRequest):
         scraped_data = await scrape_website(url)
         score_results = score_audit(scraped_data, b_type)
 
-        # 2. Extract domain cleanly
+        # 2. Clean Domain String
         clean_domain = url.replace("https://", "").replace("http://", "").split("/")[0]
 
-        # 3. Log/Notify Admin
+        # 3. Log / Notify Admin
         send_admin_notification(user_email, url, score_results)
 
-        # 4. Return Full Audit Results
+        # 4. Return Formatted Results
         return {
             "domain": clean_domain,
             "prospect_email": user_email,

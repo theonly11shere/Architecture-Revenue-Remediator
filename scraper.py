@@ -11,11 +11,9 @@ from bs4 import BeautifulSoup
 class WebScraper:
     """
     Asynchronous web scraper for the Trilloka Revenue Leak & Audit Scanner.
-    Extracts technical, structural, social, and conversion data from a target URL
-    to feed directly into scorer.py.
+    Extracts technical, structural, social, and conversion data from a target URL.
     """
 
-    # Realistic browser headers to prevent Cloudflare/WAF block
     DEFAULT_HEADERS = {
         "User-Agent": (
             "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
@@ -24,7 +22,8 @@ class WebScraper:
         ),
         "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8",
         "Accept-Language": "en-US,en;q=0.9",
-        "Upgrade-Insecure-Requests": "1",
+        "Cache-Control": "no-cache",
+        "Pragma": "no-cache",
     }
 
     SOCIAL_DOMAINS = {
@@ -46,46 +45,60 @@ class WebScraper:
         "hubspot": [r"js\.hs-scripts\.com"],
     }
 
-    def __init__(self, timeout: float = 20.0):
+    def __init__(self, timeout: float = 15.0):
         self.timeout = timeout
 
     async def scrape(self, url: str) -> Dict[str, Any]:
-        """
-        Scrapes a target URL and returns a structured dictionary for scorer.py.
-        """
         url = url.strip()
         if not url.startswith(("http://", "https://")):
-            url = f"https://{url}"
+            target_url = f"https://{url}"
+        else:
+            target_url = url
 
         start_time = time.time()
+        response = None
+        html_content = ""
+        status_code = 0
+        final_url = target_url
+        headers = {}
+
+        # Configure client with standard HTTP/1.1 and relaxed SSL
+        limits = httpx.Limits(max_keepalive_connections=5, max_connections=10)
         
         try:
             async with httpx.AsyncClient(
                 headers=self.DEFAULT_HEADERS,
                 follow_redirects=True,
-                timeout=self.timeout,
-                verify=False,  # Allows auditing sites with self-signed or invalid SSL without crashing
-                http2=True,
+                timeout=httpx.Timeout(self.timeout, connect=8.0),
+                verify=False,
+                limits=limits,
             ) as client:
-                response = await client.get(url)
+                try:
+                    response = await client.get(target_url)
+                except (httpx.ConnectError, httpx.SSLError, httpx.ProtocolError):
+                    # Fallback to http:// if https:// failed
+                    if target_url.startswith("https://"):
+                        target_url = target_url.replace("https://", "http://", 1)
+                        response = await client.get(target_url)
+                    else:
+                        raise
+
                 load_time_ms = round((time.time() - start_time) * 1000, 2)
-                
                 html_content = response.text
                 status_code = response.status_code
                 final_url = str(response.url)
                 headers = dict(response.headers)
 
             if status_code >= 400:
-                return self._build_error_response(url, f"Server responded with HTTP {status_code}")
+                return self._build_error_response(url, f"HTTP Error {status_code}")
 
-            # Parse DOM safely with BeautifulSoup
             soup = BeautifulSoup(html_content, "html.parser")
 
             return {
                 "url": final_url,
                 "original_url": url,
                 "status_code": status_code,
-                "is_success": 200 <= status_code < 300,
+                "is_success": True,
                 "load_time_ms": load_time_ms,
                 "ssl_enabled": final_url.startswith("https://"),
                 "security_headers": self._extract_security_headers(headers),
@@ -100,8 +113,7 @@ class WebScraper:
             }
 
         except Exception as exc:
-            # Catch all network & parsing exceptions cleanly
-            return self._build_error_response(url, f"Audit crawl failed: {str(exc)}")
+            return self._build_error_response(url, f"Crawl failed: {type(exc).__name__} - {str(exc)}")
 
     def _extract_meta_data(self, soup: BeautifulSoup) -> Dict[str, Any]:
         title_tag = soup.find("title")
@@ -114,10 +126,7 @@ class WebScraper:
         twitter_card = soup.find("meta", attrs={"name": "twitter:card"}) or soup.find("meta", attrs={"property": "twitter:card"})
 
         title_str = title_tag.get_text(strip=True) if title_tag else None
-        
-        desc_str = None
-        if meta_desc and meta_desc.get("content"):
-            desc_str = str(meta_desc["content"]).strip() or None
+        desc_str = str(meta_desc["content"]).strip() if meta_desc and meta_desc.get("content") else None
 
         return {
             "title": title_str,
@@ -133,11 +142,7 @@ class WebScraper:
     def _extract_headings(self, soup: BeautifulSoup) -> Dict[str, Any]:
         h1s = [h.get_text(strip=True) for h in soup.find_all("h1") if h.get_text(strip=True)]
         h2s = [h.get_text(strip=True) for h in soup.find_all("h2") if h.get_text(strip=True)]
-        return {
-            "h1_count": len(h1s),
-            "h2_count": len(h2s),
-            "h1_texts": h1s,
-        }
+        return {"h1_count": len(h1s), "h2_count": len(h2s), "h1_texts": h1s}
 
     def _extract_image_stats(self, soup: BeautifulSoup) -> Dict[str, Any]:
         images = soup.find_all("img")
@@ -169,7 +174,6 @@ class WebScraper:
             r"(buy|order|get started|book|schedule|contact|subscribe|sign up|try free|demo|cart|checkout)",
             re.IGNORECASE,
         )
-
         buttons = soup.find_all(["button", "a"])
         matching_ctas = []
 
@@ -197,10 +201,7 @@ class WebScraper:
 
     def _extract_schema_markup(self, soup: BeautifulSoup) -> Dict[str, Any]:
         json_ld_scripts = soup.find_all("script", attrs={"type": "application/ld+json"})
-        return {
-            "has_schema": len(json_ld_scripts) > 0,
-            "schema_script_count": len(json_ld_scripts),
-        }
+        return {"has_schema": len(json_ld_scripts) > 0, "schema_script_count": len(json_ld_scripts)}
 
     def _extract_security_headers(self, headers: Dict[str, str]) -> Dict[str, bool]:
         headers_lower = {k.lower(): v for k, v in headers.items()}
@@ -246,7 +247,7 @@ class WebScraper:
         }
 
 
-# Compatibility wrappers matching main.py imports
+# Compatibility wrappers
 async def scrape_website(url: str) -> Dict[str, Any]:
     scraper = WebScraper()
     return await scraper.scrape(url)
