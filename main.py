@@ -14,7 +14,6 @@ from scraper import WebScraper
 
 app = FastAPI()
 
-# Enable CORS for local testing and cross-origin integration
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -23,8 +22,10 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Mount your static assets folder
-app.mount("/static", StaticFiles(directory="static"), name="static")
+
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+app.mount("/static", StaticFiles(directory=os.path.join(BASE_DIR, "static")), name="static")
+
 
 # Root directory for HTML files
 FRONTEND_DIR = os.path.dirname(os.path.abspath(__file__))
