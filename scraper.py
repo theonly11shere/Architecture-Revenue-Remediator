@@ -15,14 +15,16 @@ class WebScraper:
     to feed directly into scorer.py.
     """
 
+    # Realistic browser headers to prevent Cloudflare/WAF block
     DEFAULT_HEADERS = {
         "User-Agent": (
             "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
             "AppleWebKit/537.36 (KHTML, like Gecko) "
-            "Chrome/126.0.0.0 Safari/537.36 AuditScanner/2.0"
+            "Chrome/126.0.0.0 Safari/537.36"
         ),
-        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8",
-        "Accept-Language": "en-US,en;q=0.5",
+        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8",
+        "Accept-Language": "en-US,en;q=0.9",
+        "Upgrade-Insecure-Requests": "1",
     }
 
     SOCIAL_DOMAINS = {
@@ -44,13 +46,14 @@ class WebScraper:
         "hubspot": [r"js\.hs-scripts\.com"],
     }
 
-    def __init__(self, timeout: float = 12.0):
+    def __init__(self, timeout: float = 20.0):
         self.timeout = timeout
 
     async def scrape(self, url: str) -> Dict[str, Any]:
         """
         Scrapes a target URL and returns a structured dictionary for scorer.py.
         """
+        url = url.strip()
         if not url.startswith(("http://", "https://")):
             url = f"https://{url}"
 
@@ -61,7 +64,8 @@ class WebScraper:
                 headers=self.DEFAULT_HEADERS,
                 follow_redirects=True,
                 timeout=self.timeout,
-                verify=False  # Allows auditing sites with self-signed or invalid SSL without crashing
+                verify=False,  # Allows auditing sites with self-signed or invalid SSL without crashing
+                http2=True,
             ) as client:
                 response = await client.get(url)
                 load_time_ms = round((time.time() - start_time) * 1000, 2)
@@ -70,6 +74,9 @@ class WebScraper:
                 status_code = response.status_code
                 final_url = str(response.url)
                 headers = dict(response.headers)
+
+            if status_code >= 400:
+                return self._build_error_response(url, f"Server responded with HTTP {status_code}")
 
             # Parse DOM safely with BeautifulSoup
             soup = BeautifulSoup(html_content, "html.parser")
@@ -106,7 +113,6 @@ class WebScraper:
         og_image = soup.find("meta", attrs={"property": "og:image"})
         twitter_card = soup.find("meta", attrs={"name": "twitter:card"}) or soup.find("meta", attrs={"property": "twitter:card"})
 
-        # Safe text extraction to prevent AttributeError on empty or nested tags
         title_str = title_tag.get_text(strip=True) if title_tag else None
         
         desc_str = None
