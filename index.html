@@ -1,0 +1,161 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Trilloka — Architectural Revenue Remediator</title>
+    <link rel="stylesheet" href="/static/styles.css">
+</head>
+<body>
+
+    <!-- Site Header & Navigation -->
+    <header class="site-header">
+        <div class="nav-container container">
+            <div class="logo">
+                <a href="/">Trilloka</a>
+            </div>
+            <nav class="main-nav nav-links">
+                <a href="/why-us">Why Us</a>
+                <a href="/solutions">Solutions</a>
+                <a href="/vlog">Vlog</a>
+            </nav>
+        </div>
+    </header>
+
+    <!-- Hero / Scan Bar Section -->
+    <main class="hero-section hero-fold">
+        <div class="hero-content">
+            <h1>Architectural Revenue Remediator</h1>
+            <p class="hero-philosophy">Scan your business infrastructure, uncover hidden revenue leaks, and fix conversion gaps instantly.</p>
+            
+            <div class="scan-bar-container domain-console" style="margin-top: 30px;">
+                <form id="scan-form" onsubmit="handleScan(event)" class="console-input-wrap">
+                    <input type="url" id="target-url" placeholder="https://yourbusiness.com" required>
+                    <button type="submit" id="scan-btn" class="btn btn-filled">Run Audit</button>
+                </form>
+            </div>
+        </div>
+    </main>
+
+    <!-- Audit Result & Metrics Modal Overlay -->
+    <div id="audit-modal" class="modal-overlay" style="display: none;">
+        <div class="modal-card">
+            <button class="modal-close" onclick="closeModal()">&times;</button>
+            
+            <div class="modal-header">
+                <h2>Audit & Revenue Remediator Report</h2>
+                <span id="modal-target-display" class="subtext"></span>
+            </div>
+
+            <div class="modal-body">
+                <!-- Readiness Score & Key Metrics -->
+                <div class="metrics-grid">
+                    <div class="metric-box">
+                        <span class="metric-label">Readiness Score</span>
+                        <span id="metric-score" class="metric-value">--</span>
+                    </div>
+                    <div class="metric-box">
+                        <span class="metric-label">Estimated Revenue Leaks</span>
+                        <span id="metric-leaks" class="metric-value text-danger">--</span>
+                    </div>
+                </div>
+
+                <!-- Risk Profile & Identified Gaps -->
+                <div class="results-section">
+                    <h3>Identified Risk Profiles & Gaps</h3>
+                    <ul id="risk-list" class="gap-list">
+                        <!-- Populated dynamically via app.js -->
+                    </ul>
+                </div>
+
+                <!-- Commercial Tier Options -->
+                <div class="tier-selection-section">
+                    <h3>Select Remediation Tier</h3>
+                    <div class="tier-cards">
+                        <div class="tier-option">
+                            <h4>Starter Fix</h4>
+                            <p>$499 / one-time</p>
+                            <button onclick="selectTier('starter')">Deploy Starter</button>
+                        </div>
+                        <div class="tier-option featured">
+                            <h4>Full Architecture Remediator</h4>
+                            <p>$1,499 / comprehensive</p>
+                            <button onclick="selectTier('full')">Deploy Full Remediator</button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="modal-footer">
+                <button class="btn-secondary" onclick="closeModal()">Close</button>
+                <button class="btn-primary" onclick="proceedToCheckout()">Proceed to Secure Checkout</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Core Scripts -->
+    <script>
+        async function handleScan(event) {
+            event.preventDefault();
+            const urlInput = document.getElementById('target-url').value;
+            const scanBtn = document.getElementById('scan-btn');
+            
+            scanBtn.textContent = 'Scanning Infrastructure...';
+            scanBtn.disabled = true;
+
+            try {
+                const response = await fetch('/api/v1/scan', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ url: urlInput })
+                });
+
+                if (!response.ok) throw new Error('Scan infrastructure failed.');
+                
+                const data = await response.json();
+                
+                // Populate Modal Data
+                document.getElementById('modal-target-display').textContent = urlInput;
+                document.getElementById('metric-score').textContent = data.score || '15%';
+                document.getElementById('metric-leaks').textContent = data.leaks || '$14,200/mo';
+                
+                // Populate dynamic risk list if provided, or default placeholders
+                const riskList = document.getElementById('risk-list');
+                riskList.innerHTML = '';
+                const risks = data.risks || [
+                    "Unoptimized conversion pathways detected",
+                    "Missing structural metadata architecture",
+                    "High bounce rate vulnerability on mobile viewports"
+                ];
+
+                risks.forEach(risk => {
+                    const li = document.createElement('li');
+                    li.textContent = risk;
+                    li.style.cssText = "color: #bbb; font-size: 13px; margin-bottom: 6px; list-style-type: disc; margin-left: 20px;";
+                    riskList.appendChild(li);
+                });
+
+                // Open Mobile-Optimized Modal
+                document.getElementById('audit-modal').style.display = 'flex';
+            } catch (err) {
+                alert('Error connecting to API backend: ' + err.message);
+            } finally {
+                scanBtn.textContent = 'Run Audit';
+                scanBtn.disabled = false;
+            }
+        }
+
+        function closeModal() {
+            document.getElementById('audit-modal').style.display = 'none';
+        }
+
+        function selectTier(tierName) {
+            console.log('Selected Tier:', tierName);
+        }
+
+        function proceedToCheckout() {
+            window.location.href = '/checkout';
+        }
+    </script>
+</body>
+</html>

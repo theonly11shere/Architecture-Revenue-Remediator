@@ -75,7 +75,8 @@ class WebScraper:
             ) as client:
                 try:
                     response = await client.get(target_url)
-                except (httpx.ConnectError, httpx.SSLError, httpx.ProtocolError):
+                except Exception:
+                    # Fallback to http:// if https:// failed
                     # Fallback to http:// if https:// failed
                     if target_url.startswith("https://"):
                         target_url = target_url.replace("https://", "http://", 1)
